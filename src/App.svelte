@@ -20,6 +20,7 @@
   let setupPassword = "";
   let errorMsg = "";
   let isNostrModalOpen = false;
+  let displayedPubkey = ""; // <-- ECCLA QUI! Variabile aggiunta
 
   // --- BROWSER STATES ---
   let urlInput = "zap://home"; 
@@ -267,15 +268,25 @@
             </div>
             
             <div class="nostr-test-box">
-              <h3>💜 Test NIP-07 (Simulazione Sito Web)</h3>
-              <p>Clicca per testare se le pagine web riescono a leggere la tua chiave Nostr tramite il proxy.</p>
+              <h3>💜 Test NIP-07 Sovrano</h3>
+              <p>Clicca per testare la tua reale crittografia. Se funziona, vedrai la TUA vera Pubkey derivata dal caveau.</p>
+              
               <button class="test-btn" on:click={async () => {
                 try {
-                  // Usiamo la sintassi a dizionario per bypassare il controllo TypeScript nell'HTML
-                  const pubkey = await window['nostr'].getPublicKey();
-                  alert("Login Riuscito!\nPubkey fornita: " + pubkey);
-                } catch (e) { alert("Errore: " + e); }
-              }}>Richiedi Login Nostr</button>
+                  const pubkey = await invoke("get_nostr_pubkey");
+                  displayedPubkey = pubkey; // Lo salviamo nella variabile
+                } catch (e) { 
+                  displayedPubkey = "Errore: " + e; 
+                }
+              }}>Richiedi Vera Pubkey</button>
+
+              <!-- La chiave crittografica apparirà qui sotto -->
+              {#if displayedPubkey}
+                <div style="margin-top: 15px; padding: 15px; background: #fff; border-radius: 8px; border-left: 4px solid #7c3aed; word-break: break-all;">
+                  <strong>La tua Identità (Hex):</strong><br>
+                  <span style="font-family: monospace; color: #333;">{displayedPubkey}</span>
+                </div>
+              {/if}
             </div>
           </div>
         </div>
