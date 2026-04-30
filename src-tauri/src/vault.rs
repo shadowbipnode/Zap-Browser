@@ -101,3 +101,15 @@ pub fn sign_nostr_event(event: serde_json::Value, app_handle: AppHandle) -> Resu
     signed_event["sig"] = serde_json::json!("fake_signature_1234567890");
     Ok(signed_event)
 }
+#[tauri::command]
+pub fn nuke_vault(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(mut path) = app_handle.path_resolver().app_data_dir() {
+        path.push("sovereign_vault.enc");
+        if path.exists() {
+            fs::remove_file(path).map_err(|_| "Impossibile eliminare il caveau.")?;
+        }
+        Ok(())
+    } else {
+        Err("Percorso non trovato.".into())
+    }
+}
