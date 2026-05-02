@@ -1,0 +1,79 @@
+// src/components/nostr/NostrPanel.tsx
+import { useState, useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+
+interface Profile { pubkey:string; npub:string; name?:string; about?:string; picture?:string; nip05?:string }
+
+export default function NostrPanel({ onClose }: { onClose:()=>void }) {
+  const [profile, setProfile] = useState<Profile|null>(null)
+  const [relays,  setRelays]  = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(()=>{
+    Promise.all([
+      invoke<Profile|null>('get_profile'),
+      invoke<string[]>('get_relays'),
+    ]).then(([p,r])=>{ setProfile(p); setRelays(r) })
+      .catch(console.error)
+      .finally(()=>setLoading(false))
+  },[])
+
+  return (
+    <>
+      <div className="panel-hd">
+        <span className="panel-hd-title">🟣 Nostr</span>
+        <button className="panel-hd-close" onClick={onClose}>×</button>
+      </div>
+      <div className="panel-body">
+        {loading && <p style={{fontSize:12,color:'var(--t2)'}}>Caricamento...</p>}
+        {!loading && !profile && (
+          <p style={{fontSize:12.5,color:'var(--t1)',lineHeight:1.65}}>
+            Nessuna identità Nostr configurata. Vai in Impostazioni → Nostr per configurarla.
+          </p>
+        )}
+        {profile && <>
+          <div className="nostr-card">
+            <div className="nostr-av">
+              {profile.picture
+                ? <img src={profile.picture} alt="" style={{width:'100%',height:'100%',borderRadius:'50%'}} />
+                : '👤'}
+            </div>
+            <div>
+              <div className="nostr-name">{profile.name||'Anonimo'}</div>
+              <div className="nostr-npub">{profile.npub.slice(0,22)}...</div>
+              {profile.nip05 && <div style={{fontSize:11,color:'var(--green)',marginTop:2}}>✓ {profile.nip05}</div>}
+            </div>
+          </div>
+
+          <div style={{padding:12,background:'var(--bg-3)',border:'1px solid var(--b0)',borderRadius:'var(--r-md)',marginBottom:14}}>
+            <div className="sec-title" style={{marginBottom:8}}>NIP-07 Browser Signer</div>
+            <p style={{fontSize:11.5,color:'var(--t1)',lineHeight:1.65,marginBottom:10}}>
+              I siti web possono richiedere la tua firma Nostr per il login. La chiave privata non lascia mai questo browser.
+            </p>
+            <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <span style={{width:6,height:6,borderRadius:'50%',background:'var(--green)',display:'block'}}/>
+              <span style={{fontSize:12,color:'var(--green)',fontWeight:600}}>Attivo — pronto a firmare</span>
+            </div>
+          </div>
+
+          <div className="sec-title">Relay ({relays.length})</div>
+          {relays.map(r=>(
+            <div key={r} className="relay-row">
+              <span className="relay-dot"/>
+              <span className="relay-url">{r}</span>
+            </div>
+          ))}
+
+          <button style={{
+            width:'100%',marginTop:14,padding:'9px',
+            border:'1px solid var(--b1)',background:'none',
+            color:'var(--t1)',borderRadius:'var(--r-sm)',cursor:'pointer',
+            fontFamily:'var(--ff)',fontSize:12,
+          }} onClick={()=>navigator.clipboard.writeText(profile.pubkey)}>
+            📋 Copia pubkey
+          </button>
+        </>}
+      </div>
+    </>
+  )
+}
