@@ -1,15 +1,18 @@
-// src/preload/webview.js
+// src/preload/webview.js — NIP-07 reale con dialogo conferma
 'use strict'
-// This preload runs inside each BrowserView (web tab)
-// It bridges NIP-07 calls back to main via ipcRenderer
 
-const { ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer } = require('electron')
 
-// Bridge for NIP-07 calls triggered by injected script
-window.__zap_ipc = (method, data) => {
-  return ipcRenderer.invoke('nostr-' + method.replace('nostr_',''), data ? { event: data } : undefined)
-}
+// Esponi window.nostr ai siti web (NIP-07)
+contextBridge.exposeInMainWorld('nostr', {
+  getPublicKey: () => ipcRenderer.invoke('nostr-get-pubkey-nip07'),
 
-window.__zap_payment = (data) => {
-  ipcRenderer.send('payment-from-page', data)
-}
+  signEvent: (event) => ipcRenderer.invoke('nostr-sign-event-nip07', { event }),
+
+  getRelays: () => ipcRenderer.invoke('nostr-get-relays-nip07'),
+
+  nip04: {
+    encrypt: (pubkey, text) => ipcRenderer.invoke('nostr-nip04-encrypt', { pubkey, text }),
+    decrypt: (pubkey, text) => ipcRenderer.invoke('nostr-nip04-decrypt', { pubkey, text }),
+  }
+})

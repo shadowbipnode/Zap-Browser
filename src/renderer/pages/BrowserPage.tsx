@@ -24,16 +24,9 @@ export default function BrowserPage() {
   const [payment, setPayment]   = useState<any>(null)
   const [paying, setPaying]     = useState(false)
 
-  // Init: crea il primo tab Electron al mount
-  useEffect(() => {
-    const firstTab = tabs[0]
-    if (firstTab && !activeId) {
-      setActive(firstTab.id)
-      window.zap?.tabCreate({ tabId: firstTab.id, url: '' })
-    }
-  }, [])
-
-  const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
+  // Assicurati che activeId sia sempre impostato
+  const resolvedActiveId = activeId || tabs[0]?.id
+  const activeTab = tabs.find(t => t.id === resolvedActiveId) || tabs[0]
   const isNew = !activeTab?.url || activeTab.url === 'zap://newtab'
 
   // Load privacy settings
@@ -54,6 +47,9 @@ export default function BrowserPage() {
     })
     window.zap?.on('blocked-count', (n: number) => setBlocked(n))
     window.zap?.on('payment-detected', (data: any) => setPayment(data))
+    window.zap?.on('tab-switched', ({ tabId }: any) => {
+      setActive(tabId)
+    })
   }, [activeId])
 
   // Sync address bar with active tab
@@ -72,15 +68,18 @@ export default function BrowserPage() {
   const handleNewTab = useCallback((url?: string) => {
     const id = crypto.randomUUID()
     addTab(url || 'zap://newtab')
-    setActive(id)
     window.zap?.tabCreate({ tabId: id, url: url || '' })
+    setActive(id)
   }, [addTab, setActive])
 
   // Switch tab
   const handleSwitchTab = useCallback((id: string) => {
     setActive(id)
-    window.zap?.tabSwitch({ tabId: id })
-  }, [setActive])
+    setAddrVal('')
+    const tab = tabs.find(t => t.id === id)
+    const url = tab?.url === 'zap://newtab' ? '' : (tab?.url || '')
+    window.zap?.tabSwitch({ tabId: id, url })
+  }, [setActive, tabs])
 
   // Close tab
   const handleCloseTab = useCallback((id: string) => {
@@ -90,12 +89,11 @@ export default function BrowserPage() {
 
   // Navigate
   const handleNavigate = useCallback((url: string) => {
-    const tabId = activeId || tabs[0]?.id
-    if (!tabId) return
-    window.zap?.tabNavigate({ tabId, url }).then((res: any) => {
-      if (res?.url) updateTab(tabId, { url: res.url, loading: true })
+    if (!resolvedActiveId) return
+    window.zap?.tabNavigate({ tabId: resolvedActiveId, url }).then((res: any) => {
+      if (res?.url) updateTab(resolvedActiveId, { url: res.url, loading: true })
     })
-  }, [activeId, tabs, updateTab])
+  }, [activeId, updateTab])
 
   const handleAddrKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return
@@ -153,16 +151,19 @@ export default function BrowserPage() {
         borderBottom: '1px solid var(--b0)',
         flexShrink: 0, padding: '0 12px',
       }}>
+        <div style={{ flex:1, fontSize:11, fontWeight:700, color:'var(--t2)' }}>
+          ⚡ Zap Browser
+        </div>
         <div style={{ display:'flex', gap:6, WebkitAppRegion:'no-drag' as any }}>
-          <button onClick={() => window.zap?.close()}
-            style={{ width:12, height:12, borderRadius:'50%', background:'#ff5f56', border:'none', cursor:'pointer' }} />
           <button onClick={() => window.zap?.minimize()}
+            title="Minimizza"
             style={{ width:12, height:12, borderRadius:'50%', background:'#ffbd2e', border:'none', cursor:'pointer' }} />
           <button onClick={() => window.zap?.maximize()}
+            title="Ingrandisci"
             style={{ width:12, height:12, borderRadius:'50%', background:'#27c93f', border:'none', cursor:'pointer' }} />
-        </div>
-        <div style={{ flex:1, textAlign:'center', fontSize:11, fontWeight:700, color:'var(--t2)' }}>
-          ⚡ Zap Browser
+          <button onClick={() => window.zap?.close()}
+            title="Chiudi"
+            style={{ width:12, height:12, borderRadius:'50%', background:'#ff5f56', border:'none', cursor:'pointer' }} />
         </div>
       </div>
 
@@ -181,9 +182,9 @@ export default function BrowserPage() {
 
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div className="toolbar">
-        <button className="navbtn" onClick={() => window.zap?.tabBack({ tabId: activeId })}>←</button>
-        <button className="navbtn" onClick={() => window.zap?.tabForward({ tabId: activeId })}>→</button>
-        <button className="navbtn" onClick={() => window.zap?.tabReload({ tabId: activeId })}>↻</button>
+        <button className="navbtn" onClick={() => { const id = activeId || tabs[0]?.id; if(id) window.zap?.tabBack({ tabId: id }) }}>←</button>
+        <button className="navbtn" onClick={() => { const id = activeId || tabs[0]?.id; if(id) window.zap?.tabForward({ tabId: id }) }}>→</button>
+        <button className="navbtn" onClick={() => { const id = activeId || tabs[0]?.id; if(id) window.zap?.tabReload({ tabId: id }) }}>↻</button>
 
         {/* Address bar */}
         <div className="addr-wrap" style={{ cursor:'text' }}>

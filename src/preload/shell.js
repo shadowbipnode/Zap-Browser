@@ -63,9 +63,11 @@ contextBridge.exposeInMainWorld('zap', {
   cashuAddMint:     (args) => ipcRenderer.invoke('cashu-add-mint', args),
   cashuRemoveMint:  (args) => ipcRenderer.invoke('cashu-remove-mint', args),
 
+  resetBrowser: () => ipcRenderer.invoke('reset-browser'),
+
   // Events from main → renderer
   on: (channel, cb) => {
-    const allowed = ['tab-updated','blocked-count','payment-detected','app-ready']
+    const allowed = ['tab-updated','blocked-count','payment-detected','app-ready','tab-switched']
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
   },
   off: (channel, cb) => ipcRenderer.removeListener(channel, cb),

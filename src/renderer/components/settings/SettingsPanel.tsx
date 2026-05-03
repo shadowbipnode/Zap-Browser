@@ -92,10 +92,33 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
               </div>
             ))}
           </>}
-          {(sec==='cashu'||sec==='nostr'||sec==='browser') && (
+          {(sec==='cashu'||sec==='nostr') && (
             <p style={{ fontSize:12, color:'var(--t1)', lineHeight:1.7 }}>
               Configurazione disponibile nei pannelli dedicati.
             </p>
+          )}
+          {sec==='browser' && (
+            <div>
+              <div className="sec-title">Generale</div>
+              <p style={{ fontSize:12, color:'var(--t1)', lineHeight:1.7, marginBottom:16 }}>
+                Resetta il browser al primo avvio — cancella wallet, seed, profilo Nostr e tutte le impostazioni.
+              </p>
+              <button
+                onClick={async () => {
+                  const ok = window.confirm('Sei sicuro? Questa azione cancellerà TUTTO — seed, wallet, profilo Nostr. Non è reversibile.')
+                  if (!ok) return
+                  await (window as any).zap.resetBrowser()
+                  window.location.reload()
+                }}
+                style={{
+                  width:'100%', padding:'10px', border:'1px solid var(--red)',
+                  background:'var(--red-bg)', color:'var(--red)',
+                  borderRadius:'var(--r-sm)', cursor:'pointer',
+                  fontFamily:'var(--ff)', fontSize:13, fontWeight:700,
+                }}>
+                🗑️ Reset completo browser
+              </button>
+            </div>
           )}
         </div>
       </div>
