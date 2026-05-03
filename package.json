@@ -1,32 +1,58 @@
 {
   "name": "zap-browser",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
+  "description": "Privacy-first Bitcoin browser with Lightning, Liquid, Cashu and Nostr",
+  "main": "src/main/index.js",
   "scripts": {
-    "dev":          "vite",
-    "build":        "tsc && vite build",
-    "tauri:dev":    "tauri dev",
-    "tauri:build":  "tauri build"
+    "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev:renderer": "vite --config src/renderer/vite.config.ts",
+    "build": "vite build --config src/renderer/vite.config.ts && electron-builder",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.zapbrowser.app",
+    "productName": "Zap Browser",
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "src/main/**",
+      "src/preload/**",
+      "dist/**",
+      "assets/**"
+    ]
   },
   "dependencies": {
-    "@tauri-apps/api":                   "^2.0.0",
-    "@tauri-apps/plugin-dialog":         "^2.0.0",
-    "@tauri-apps/plugin-shell":          "^2.0.0",
-    "@tauri-apps/plugin-store":          "^2.0.0",
-    "@tauri-apps/plugin-http":           "^2.0.0",
-    "@tauri-apps/plugin-clipboard-manager": "^2.0.0",
-    "react":                             "^18.3.1",
-    "react-dom":                         "^18.3.1",
-    "zustand":                           "^4.5.4",
-    "nostr-tools":                       "^2.7.0",
-    "@cashu/cashu-ts":                   "^1.1.0"
+    "@noble/hashes": "^1.4.0",
+    "@noble/secp256k1": "^2.1.0",
+    "better-sqlite3": "^9.4.3",
+    "bip39": "^3.1.0",
+    "electron-store": "^8.1.0",
+    "nostr-tools": "^1.17.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli":    "^2.0.0",
-    "@types/react":       "^18.3.3",
-    "@types/react-dom":   "^18.3.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "typescript":         "^5.5.3",
-    "vite":               "^5.4.0"
+    "concurrently": "^8.2.2",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.0",
+    "electron-rebuild": "^3.2.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.0",
+    "wait-on": "^7.2.0",
+    "zustand": "^4.5.4"
   }
 }
