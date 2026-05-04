@@ -146,6 +146,11 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'))
   }
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize()
+    mainWindow.show()
+  })
+
   mainWindow.webContents.on('did-finish-load', () => {
     const initialized = DB.getSetting('initialized') === '1'
     mainWindow.webContents.send('app-ready', { initialized })

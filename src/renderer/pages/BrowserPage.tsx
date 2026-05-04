@@ -20,7 +20,8 @@ export default function BrowserPage() {
   const [addrVal, setAddrVal]   = useState('')
   const [privacy, setPrivacy]   = useState<any>(null)
   const [uaDrop, setUaDrop]     = useState(false)
-  const [blocked, setBlocked]   = useState(0)
+  const [blocked,  setBlocked]   = useState(0)
+  const [currentUA, setCurrentUA] = useState('')
   const [payment, setPayment]   = useState<any>(null)
   const [pageNostr, setPageNostr] = useState(false)
   const [v4vInfo,   setV4vInfo]   = useState<any>(null)
@@ -33,6 +34,9 @@ export default function BrowserPage() {
   // Load privacy settings
   useEffect(() => {
     window.zap?.getPrivacy().then(setPrivacy)
+    window.zap?.getUAPool().then((pool: string[]) => {
+      if (pool && pool.length > 0) setCurrentUA(pool[Math.floor(Math.random() * pool.length)])
+    })
     window.zap?.getBlockedCount().then(setBlocked)
   }, [])
 
@@ -146,16 +150,18 @@ export default function BrowserPage() {
         borderBottom: '1px solid var(--b0)',
         flexShrink: 0, padding: '0 12px',
       }}>
-        <div style={{ display:'flex', gap:6, WebkitAppRegion:'no-drag' as any }}>
-          <button onClick={() => window.zap?.close()}
-            style={{ width:12, height:12, borderRadius:'50%', background:'#ff5f56', border:'none', cursor:'pointer' }} />
-          <button onClick={() => window.zap?.minimize()}
-            style={{ width:12, height:12, borderRadius:'50%', background:'#ffbd2e', border:'none', cursor:'pointer' }} />
-          <button onClick={() => window.zap?.maximize()}
-            style={{ width:12, height:12, borderRadius:'50%', background:'#27c93f', border:'none', cursor:'pointer' }} />
-        </div>
-        <div style={{ flex:1, textAlign:'center', fontSize:11, fontWeight:700, color:'var(--t2)' }}>
+        <div style={{ flex:1, fontSize:11, fontWeight:700, color:'var(--t2)' }}>
           ⚡ Zap Browser
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8, WebkitAppRegion:'no-drag' as any }}>
+          <button onClick={() => (window as any).zap?.openDevTools?.()}
+            title="DevTools" style={{ background:'none', border:'none', color:'var(--t2)', fontSize:11, cursor:'pointer', padding:'0 2px', opacity:0.5 }}>🛠</button>
+          <button onClick={() => window.zap?.minimize()}
+            title="Minimizza" style={{ width:13, height:13, borderRadius:'50%', background:'#ffbd2e', border:'none', cursor:'pointer' }} />
+          <button onClick={() => window.zap?.maximize()}
+            title="Ingrandisci" style={{ width:13, height:13, borderRadius:'50%', background:'#27c93f', border:'none', cursor:'pointer' }} />
+          <button onClick={() => window.zap?.close()}
+            title="Chiudi" style={{ width:13, height:13, borderRadius:'50%', background:'#ff5f56', border:'none', cursor:'pointer' }} />
         </div>
       </div>
 
@@ -273,7 +279,7 @@ export default function BrowserPage() {
           <div className="side-panel">
             {panel === 'wallet'    && <WalletPanel    onClose={() => setPanel(null)} />}
             {panel === 'nostr'     && <NostrPanel     onClose={() => setPanel(null)} />}
-            {panel === 'favorites' && <FavoritesPanel onClose={() => setPanel(null)} onNavigate={handleNavigate} />}
+            {panel === 'favorites' && <FavoritesPanel onClose={() => setPanel(null)} onNavigate={handleNavigate} currentUrl={activeTab?.url||''} currentTitle={activeTab?.title||''} />}
             {panel === 'settings'  && <SettingsPanel  onClose={() => setPanel(null)} />}
           </div>
         )}
