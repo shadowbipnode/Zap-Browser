@@ -1,12 +1,7 @@
 'use strict'
 
-const {
-  getPublicKey,
-  getEventHash,
-  signEvent: signNostrEvent,
-  nip19,
-  nip04,
-} = require('nostr-tools')
+const nostrTools = require('nostr-tools')
+const { getPublicKey, getEventHash, nip19 } = nostrTools
 
 const { hmac }   = require('@noble/hashes/hmac')
 const { sha256 } = require('@noble/hashes/sha256')
@@ -19,52 +14,39 @@ function deriveNostrKey(seedHex) {
   return bytesToHex(key.slice(0, 32))
 }
 
-function publishMetadata(privKeyHex, name, about) {
+function signEv(event, privKey) {
+  // Normalizza: accetta sia hex string che Uint8Array
+  const privKeyHex = typeof privKey === 'string' ? privKey : bytesToHex(privKey)
   try {
-    const WebSocket = require('ws')
-    const relays = Object.keys(getRelays())
-    const pubkey = getPublicKey(privKeyHex)
-    const event = {
-      kind: 0,
-      pubkey,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [],
-      content: JSON.stringify({
-        name: name || 'anon',
-        display_name: name || 'anon',
-        about: about || '',
-        picture: '',
-      }),
+    if (typeof nostrTools.signEvent === 'function') {
+      event.id  = getEventHash(event)
+      event.sig = nostrTools.signEvent(event, privKeyHex)
+      return event
     }
-    event.id  = getEventHash(event)
-    event.sig = signNostrEvent(event, privKeyHex)
-
-    for (const relay of relays) {
-      try {
-        const ws = new WebSocket(relay)
-        ws.on('open', () => {
-          ws.send(JSON.stringify(['EVENT', event]))
-          setTimeout(() => ws.close(), 4000)
-        })
-        ws.on('error', () => {})
-      } catch(_) {}
+    if (typeof nostrTools.finalizeEvent === 'function') {
+      return nostrTools.finalizeEvent(event, Buffer.from(privKeyHex, 'hex'))
     }
-  } catch(e) { console.error('[Nostr] publishMetadata error:', e.message) }
+    if (typeof nostrTools.getSignature === 'function') {
+      event.id  = getEventHash(event)
+      event.sig = nostrTools.getSignature(event, privKeyHex)
+      return event
+    }
+    throw new Error('Nessuna funzione di firma trovata in nostr-tools')
+  } catch(e) {
+    throw new Error('signEvent failed: ' + e.message)
+  }
 }
+
+
 
 function createProfile(DB, { seedHex, name, about }) {
   const privKeyHex = deriveNostrKey(seedHex)
   const pubKeyHex  = getPublicKey(privKeyHex)
   const npub       = nip19.npubEncode(pubKeyHex)
 
-  const db = DB._db()
-  db.prepare(`INSERT OR REPLACE INTO nostr_profile
-    (id,pubkey,npub,encrypted_nsec,name,about,created_at)
-    VALUES(1,?,?,?,?,?,?)`)
+  DB._db().prepare(`INSERT OR REPLACE INTO nostr_profile
+    (id,pubkey,npub,encrypted_nsec,name,about,created_at) VALUES(1,?,?,?,?,?,?)`)
     .run(pubKeyHex, npub, privKeyHex, name||'anon', about||null, Math.floor(Date.now()/1000))
-
-  // Pubblica metadata sui relay
-  publishMetadata(privKeyHex, name, about)
 
   return { pubkey: pubKeyHex, npub, name, about }
 }
@@ -72,61 +54,49 @@ function createProfile(DB, { seedHex, name, about }) {
 function importNsec(DB, { nsec, name }) {
   let privKeyHex
   try {
-    const decoded = nip19.decode(nsec)
-    privKeyHex = bytesToHex(decoded.data)
+    const decoded = nip19.decode(nsec.trim())
+    privKeyHex = decoded.data
   } catch(_) {
-    privKeyHex = nsec.replace(/^0x/, '')
+    privKeyHex = nsec.trim().replace(/^0x/, '')
   }
   const pubKeyHex = getPublicKey(privKeyHex)
   const npub      = nip19.npubEncode(pubKeyHex)
 
-  const db = DB._db()
-  db.prepare(`INSERT OR REPLACE INTO nostr_profile
-    (id,pubkey,npub,encrypted_nsec,name,created_at)
-    VALUES(1,?,?,?,?,?)`)
+  DB._db().prepare(`INSERT OR REPLACE INTO nostr_profile
+    (id,pubkey,npub,encrypted_nsec,name,created_at) VALUES(1,?,?,?,?,?)`)
     .run(pubKeyHex, npub, privKeyHex, name||'anon', Math.floor(Date.now()/1000))
-
-  publishMetadata(privKeyHex, name, null)
 
   return { pubkey: pubKeyHex, npub, name }
 }
 
 function getProfile(DB) {
-  return DB._db().prepare(
-    'SELECT pubkey,npub,name,about,picture,nip05 FROM nostr_profile WHERE id=1'
-  ).get() || null
+  return DB._db().prepare('SELECT pubkey,npub,name,about,picture,nip05 FROM nostr_profile WHERE id=1').get()||null
 }
 
-function getPubkey(DB) {
-  const p = getProfile(DB)
-  return p ? p.pubkey : null
-}
+function getPubkey(DB) { const p=getProfile(DB); return p?p.pubkey:null }
 
 function signEvent(DB, event) {
   const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
-  if (!row) throw new Error('Nessun profilo Nostr configurato')
+  if (!row) throw new Error('Nessun profilo Nostr')
   const privKeyHex = row.encrypted_nsec
   const pubkey     = getPublicKey(privKeyHex)
-  const ev = {
-    kind:       event.kind       || 1,
+  return signEv({
+    kind:       event.kind    || 1,
     pubkey,
-    tags:       event.tags       || [],
-    content:    event.content    || '',
-    created_at: Math.floor(Date.now() / 1000),
-  }
-  ev.id  = getEventHash(ev)
-  ev.sig = signNostrEvent(ev, privKeyHex)
-  return ev
+    tags:       event.tags    || [],
+    content:    event.content || '',
+    created_at: event.created_at || Math.floor(Date.now()/1000),
+  }, privKeyHex)
 }
 
 function getRelays() {
   return {
-    'wss://relay.shadowbip.com':  { read:true, write:true },
-    'wss://relay.damus.io':       { read:true, write:true },
-    'wss://relay.nostr.band':     { read:true, write:true },
-    'wss://nos.lol':              { read:true, write:true },
-    'wss://relay.snort.social':   { read:true, write:true },
-    'wss://nostr.wine':           { read:true, write:false },
+    'wss://relay.shadowbip.com':  {read:true,write:true},
+    'wss://relay.damus.io':       {read:true,write:true},
+    'wss://relay.nostr.band':     {read:true,write:true},
+    'wss://nos.lol':              {read:true,write:true},
+    'wss://relay.snort.social':   {read:true,write:true},
+    'wss://nostr.wine':           {read:true,write:false},
   }
 }
 

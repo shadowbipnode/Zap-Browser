@@ -1,73 +1,76 @@
-// src/preload/shell.js
 'use strict'
-
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('zap', {
-  // Window controls
   minimize:    () => ipcRenderer.send('win-minimize'),
   maximize:    () => ipcRenderer.send('win-maximize'),
   close:       () => ipcRenderer.send('win-close'),
 
-  // Tab management
-  tabCreate:   (args) => ipcRenderer.invoke('tab-create', args),
-  tabSwitch:   (args) => ipcRenderer.invoke('tab-switch', args),
-  tabClose:    (args) => ipcRenderer.invoke('tab-close', args),
-  tabNavigate: (args) => ipcRenderer.invoke('tab-navigate', args),
-  tabBack:     (args) => ipcRenderer.invoke('tab-go-back', args),
-  tabForward:  (args) => ipcRenderer.invoke('tab-go-forward', args),
-  tabReload:   (args) => ipcRenderer.invoke('tab-reload', args),
-  shellResize: (args) => ipcRenderer.invoke('shell-resize', args),
+  tabCreate:   (a) => ipcRenderer.invoke('tab-create', a),
+  tabSwitch:   (a) => ipcRenderer.invoke('tab-switch', a),
+  tabClose:    (a) => ipcRenderer.invoke('tab-close', a),
+  tabNavigate: (a) => ipcRenderer.invoke('tab-navigate', a),
+  tabBack:     (a) => ipcRenderer.invoke('tab-go-back', a),
+  tabForward:  (a) => ipcRenderer.invoke('tab-go-forward', a),
+  tabReload:   (a) => ipcRenderer.invoke('tab-reload', a),
+  shellResize: (a) => ipcRenderer.invoke('shell-resize', a),
 
-  // Privacy
-  getPrivacy:     () => ipcRenderer.invoke('get-privacy'),
-  setAdblock:     (args) => ipcRenderer.invoke('set-adblock', args),
-  setWebRTC:      (args) => ipcRenderer.invoke('set-webrtc', args),
-  setUAMode:      (args) => ipcRenderer.invoke('set-ua-mode', args),
-  rotateUA:       () => ipcRenderer.invoke('rotate-ua'),
-  getBlockedCount:() => ipcRenderer.invoke('get-blocked-count'),
-  getUAPool:      () => ipcRenderer.invoke('get-ua-pool'),
+  getPrivacy:      () => ipcRenderer.invoke('get-privacy'),
+  setAdblock:      (a) => ipcRenderer.invoke('set-adblock', a),
+  setWebRTC:       (a) => ipcRenderer.invoke('set-webrtc', a),
+  setUAMode:       (a) => ipcRenderer.invoke('set-ua-mode', a),
+  rotateUA:        () => ipcRenderer.invoke('rotate-ua'),
+  getBlockedCount: () => ipcRenderer.invoke('get-blocked-count'),
+  getUAPool:       () => ipcRenderer.invoke('get-ua-pool'),
+  setDoh:          (a) => ipcRenderer.invoke('set-doh', a),
+  getBlocklistInfo:() => ipcRenderer.invoke('get-blocklist-info'),
 
-  // Wallet
-  isInitialized:  () => ipcRenderer.invoke('is-initialized'),
+  v4vSendBoost:   (a) => ipcRenderer.invoke('v4v-send-boost', a),
+  v4vSetAutopay:  (a) => ipcRenderer.invoke('v4v-set-autopay', a),
+  v4vGetSettings: () => ipcRenderer.invoke('v4v-get-settings'),
+
+  isInitialized:    () => ipcRenderer.invoke('is-initialized'),
   generateMnemonic: () => ipcRenderer.invoke('generate-mnemonic'),
-  validateMnemonic: (args) => ipcRenderer.invoke('validate-mnemonic', args),
-  setupWallet:    (args) => ipcRenderer.invoke('setup-wallet', args),
+  validateMnemonic: (a) => ipcRenderer.invoke('validate-mnemonic', a),
+  setupWallet:      (a) => ipcRenderer.invoke('setup-wallet', a),
 
-  // Nostr
-  nostrCreateProfile: (args) => ipcRenderer.invoke('nostr-create-profile', args),
-  nostrImportNsec:    (args) => ipcRenderer.invoke('nostr-import-nsec', args),
+  nostrCreateProfile: (a) => ipcRenderer.invoke('nostr-create-profile', a),
+  nostrImportNsec:    (a) => ipcRenderer.invoke('nostr-import-nsec', a),
   nostrSkip:          () => ipcRenderer.invoke('nostr-skip'),
   nostrGetProfile:    () => ipcRenderer.invoke('nostr-get-profile'),
   nostrGetRelays:     () => ipcRenderer.invoke('nostr-get-relays'),
-  nostrSignEvent:     (args) => ipcRenderer.invoke('nostr-sign-event', args),
+  nostrSignEvent:     (a) => ipcRenderer.invoke('nostr-sign-event', a),
   nostrGetPubkey:     () => ipcRenderer.invoke('nostr-get-pubkey'),
 
-  // NWC Lightning
-  nwcConnect:      (args) => ipcRenderer.invoke('nwc-connect', args),
+  nwcConnect:      (a) => ipcRenderer.invoke('nwc-connect', a),
   nwcDisconnect:   () => ipcRenderer.invoke('nwc-disconnect'),
   nwcIsConnected:  () => ipcRenderer.invoke('nwc-is-connected'),
   nwcGetBalance:   () => ipcRenderer.invoke('nwc-get-balance'),
-  nwcPayInvoice:   (args) => ipcRenderer.invoke('nwc-pay-invoice', args),
-  nwcMakeInvoice:  (args) => ipcRenderer.invoke('nwc-make-invoice', args),
-  decodeInvoice:   (args) => ipcRenderer.invoke('decode-invoice', args),
+  nwcPayInvoice:   (a) => ipcRenderer.invoke('nwc-pay-invoice', a),
+  nwcMakeInvoice:  (a) => ipcRenderer.invoke('nwc-make-invoice', a),
+  decodeInvoice:   (a) => ipcRenderer.invoke('decode-invoice', a),
 
-  // Favorites
   getFavorites:   () => ipcRenderer.invoke('get-favorites'),
-  addFavorite:    (args) => ipcRenderer.invoke('add-favorite', args),
-  removeFavorite: (args) => ipcRenderer.invoke('remove-favorite', args),
+  addFavorite:    (a) => ipcRenderer.invoke('add-favorite', a),
+  removeFavorite: (a) => ipcRenderer.invoke('remove-favorite', a),
 
-  // Cashu
   cashuGetBalance:  () => ipcRenderer.invoke('cashu-get-balance'),
   cashuListMints:   () => ipcRenderer.invoke('cashu-list-mints'),
-  cashuAddMint:     (args) => ipcRenderer.invoke('cashu-add-mint', args),
-  cashuRemoveMint:  (args) => ipcRenderer.invoke('cashu-remove-mint', args),
+  cashuAddMint:     (a) => ipcRenderer.invoke('cashu-add-mint', a),
+  cashuRemoveMint:  (a) => ipcRenderer.invoke('cashu-remove-mint', a),
 
-  resetBrowser: () => ipcRenderer.invoke('reset-browser'),
+  resetBrowser:  () => ipcRenderer.invoke('reset-browser'),
+  getHistory:    (args) => ipcRenderer.invoke('get-history', args),
+  clearHistory:  () => ipcRenderer.invoke('clear-history'),
+  clearCookies:  () => ipcRenderer.invoke('clear-cookies'),
+  clearCache:    () => ipcRenderer.invoke('clear-cache'),
+  openDevTools: () => ipcRenderer.invoke('open-devtools'),
 
-  // Events from main → renderer
   on: (channel, cb) => {
-    const allowed = ['tab-updated','blocked-count','payment-detected','app-ready','tab-switched']
+    const allowed = [
+      'tab-updated','blocked-count','payment-detected','app-ready',
+      'tab-switched','page-features','v4v-detected','blocklist-ready'
+    ]
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
   },
   off: (channel, cb) => ipcRenderer.removeListener(channel, cb),

@@ -7,17 +7,20 @@
     "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:3000 && electron .\"",
     "dev:renderer": "vite --config src/renderer/vite.config.ts",
     "build": "vite build --config src/renderer/vite.config.ts && electron-builder",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps"
   },
   "build": {
     "appId": "com.zapbrowser.app",
-    "productName": "Zap Browser",
+    "productName": "zap-browser",
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "icon": "assets/icons",
+      "maintainer": "Zap Browser Contributors <dev@zapbrowser.org>"
     },
     "mac": {
       "target": "dmg"
@@ -30,11 +33,14 @@
       "src/preload/**",
       "dist/**",
       "assets/**"
-    ]
+    ],
+    "icon": "assets/icons/icon.png",
+    "executableName": "zap-browser"
   },
   "dependencies": {
     "@noble/hashes": "^1.4.0",
     "@noble/secp256k1": "^2.1.0",
+    "axios": "^1.16.0",
     "better-sqlite3": "^9.4.3",
     "bip39": "^3.1.0",
     "electron-store": "^8.1.0",
@@ -47,7 +53,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^8.2.2",
     "electron": "^30.0.0",
-    "electron-builder": "^24.13.0",
+    "electron-builder": "^24.13.3",
     "electron-rebuild": "^3.2.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -55,5 +61,9 @@
     "vite": "^5.4.0",
     "wait-on": "^7.2.0",
     "zustand": "^4.5.4"
+  },
+  "author": {
+    "name": "Zap Browser Contributors",
+    "email": "dev@zapbrowser.org"
   }
 }

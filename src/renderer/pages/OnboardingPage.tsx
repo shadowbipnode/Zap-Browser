@@ -27,10 +27,7 @@ export default function OnboardingPage({ onDone }: { onDone:()=>void }) {
 
   const genSeed = async () => {
     setLoading(true); setErr('')
-    try {
-      const result = await (window as any).zap.generateMnemonic()
-      setWords(Array.isArray(result) ? result : result.split(' '))
-    }
+    try { setWords(await (window as any).zap.generateMnemonic()) }
     catch(e: any) { setErr(String(e)) }
     setLoading(false)
   }
@@ -38,7 +35,7 @@ export default function OnboardingPage({ onDone }: { onDone:()=>void }) {
   const finalize = async (nc: NostrChoice) => {
     setLoading(true); setErr('')
     try {
-      if (nc==='from-seed' && seedHex) await (window as any).zap.nostrCreateProfile({ seedHex: String(seedHex), name: name||'anon', about: null })
+      if (nc==='from-seed' && seedHex) await (window as any).zap.nostrCreateProfile({ seedHex, name: name||'anon', about: null })
       else if (nc==='import-nsec') await (window as any).zap.nostrImportNsec({ nsec: importNsec, name: name||'anon' })
       else await (window as any).zap.nostrSkip()
       setStep('done')

@@ -51,6 +51,14 @@ function init() {
       spent      INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      url        TEXT NOT NULL,
+      title      TEXT,
+      visited_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_history_visited ON history(visited_at DESC);
+
     CREATE TABLE IF NOT EXISTS favorites (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       title      TEXT NOT NULL,
@@ -130,10 +138,30 @@ function cashuRemoveMint(url) {
   return { ok: true }
 }
 
+function addHistory(url, title) {
+  if (!url || url === 'zap://newtab') return
+  db.prepare('INSERT INTO history(url,title,visited_at) VALUES(?,?,?)').run(url, title||url, Math.floor(Date.now()/1000))
+}
+
+function getHistory(limit = 100) {
+  return db.prepare('SELECT * FROM history ORDER BY visited_at DESC LIMIT ?').all(limit)
+}
+
+function clearHistory() {
+  db.prepare('DELETE FROM history').run()
+  return { ok: true }
+}
+
+function clearCookies() {
+  // Gestito via Electron session
+  return { ok: true }
+}
+
 module.exports = {
   init, getSetting, setSetting,
   getPrivacy, setPrivacy,
   getFavorites, addFavorite, removeFavorite,
+  addHistory, getHistory, clearHistory, clearCookies,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   _db: () => db,
 }

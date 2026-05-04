@@ -1,0 +1,38 @@
+appId: com.zapbrowser.app
+productName: "ZapBrowser"
+copyright: "Copyright © 2025 Zap Browser Contributors"
+
+directories:
+  output: dist-release
+  buildResources: assets
+
+files:
+  - src/main/**
+  - src/preload/**
+  - dist/**
+  - package.json
+
+icon: assets/icons/icon.png
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  category: Network
+  icon: assets/icons
+  maintainer: "Zap Browser Contributors <dev@zapbrowser.org>"
+  description: "Privacy-first Bitcoin browser with Lightning, Cashu and Nostr"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
