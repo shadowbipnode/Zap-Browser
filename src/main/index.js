@@ -98,7 +98,12 @@ function setupPrivacy(ses) {
   ses.webRequest.onBeforeRequest({ urls:['*://*/*'] }, (details, cb) => {
     const priv = DB.getPrivacy()
     if (!priv.adblock) return cb({})
-    if (bl.shouldBlock(details.url)) {
+    // Non bloccare mai immagini, font, media, CSS
+    const safeTypes = ['image', 'imageset', 'font', 'media', 'stylesheet']
+    if (safeTypes.includes(details.resourceType)) return cb({})
+
+    const pageUrl = details.referrer || ''
+    if (bl.shouldBlock(details.url, pageUrl)) {
       bl.incrementBlocked()
       mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
       return cb({ cancel: true })
@@ -133,6 +138,8 @@ function createWindow() {
       contextIsolation:true, nodeIntegration:false,
     },
   })
+  // Imposta UA a livello di sessione PRIMA di creare la view
+  session.defaultSession.setUserAgent(currentUA)
   activeView = createMainView()
   setupPrivacy(session.defaultSession)
   bl.init((size) => {
@@ -217,8 +224,17 @@ ipcMain.handle('get-privacy', () => ({
 }))
 ipcMain.handle('set-adblock',      (_, {enabled}) => DB.setPrivacy('adblock', enabled?1:0))
 ipcMain.handle('set-webrtc',       (_, {enabled}) => DB.setPrivacy('webrtc_protect', enabled?1:0))
-ipcMain.handle('set-ua-mode',      (_, {mode}) => { DB.setPrivacy('ua_mode',mode); if(mode==='rotate') currentUA=UA_POOL[Math.floor(Math.random()*UA_POOL.length)]; return currentUA })
-ipcMain.handle('rotate-ua',        () => { currentUA=UA_POOL[Math.floor(Math.random()*UA_POOL.length)]; return currentUA })
+ipcMain.handle('set-ua-mode',      (_, {mode}) => {
+  DB.setPrivacy('ua_mode', mode)
+  if (mode === 'rotate') currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
+  session.defaultSession.setUserAgent(mode === 'default' ? '' : currentUA)
+  return currentUA
+})
+ipcMain.handle('rotate-ua', () => {
+  currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
+  session.defaultSession.setUserAgent(currentUA)
+  return currentUA
+})
 ipcMain.handle('get-blocked-count',() => bl.getBlockedCount())
 ipcMain.handle('get-ua-pool',      () => UA_POOL)
 ipcMain.handle('set-doh',          (_, {enabled, provider}) => { doh.setEnabled(enabled); if(provider) doh.setProvider(provider); DB.setPrivacy('doh_enabled',enabled?1:0); return {ok:true} })

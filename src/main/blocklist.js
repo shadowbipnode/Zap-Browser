@@ -120,6 +120,13 @@ const WHITELIST = new Set([
   'lnmarkets.com','bitrefill.com','robosats.com',
   'coinos.io','minibits.cash','legend.lnbits.com',
   'bitcoin.org','bitcoinmagazine.com',
+  // Immagini news e fotografie
+  'gettyimages.com','gettyimageslatam.com','gi-cdn.com',
+  'imagn.com','usatoday.com',
+  'zoonar.com','shutterstock.com','istockphoto.com',
+  'dreamstime.com','alamy.com',
+  'corrieredellosport.it','sport.sky.it',
+  'pianetabasket.com','sportface.it',
   // Misc
   'recaptcha.net','gstatic.com',
   'disqus.com','disquscdn.com',
@@ -245,23 +252,48 @@ async function updateLists(onReady) {
   if (onReady) onReady(blockSet.size)
 }
 
-function shouldBlock(url) {
-  if (!initialized) return false
-  let host
-  try { host = new URL(url).hostname.replace(/^www\./, '').toLowerCase() }
-  catch(_) { return false }
+function getBaseDomain(hostname) {
+  // Estrai dominio base: sub.example.co.uk -> example.co.uk
+  const parts = hostname.split('.')
+  if (parts.length <= 2) return hostname
+  // Gestisci TLD doppi comuni
+  const twoPartTlds = ['co.uk','co.it','com.br','co.jp','co.au','co.nz','co.za','com.ar','com.mx']
+  const lastTwo = parts.slice(-2).join('.')
+  if (twoPartTlds.includes(lastTwo)) return parts.slice(-3).join('.')
+  return parts.slice(-2).join('.')
+}
 
-  // 1. Whitelist — mai bloccare
+function shouldBlock(url, pageUrl) {
+  if (!initialized) return false
+  let host, pageHost, pageBase
+  try {
+    host = new URL(url).hostname.replace(/^www\./, '').toLowerCase()
+    if (pageUrl) {
+      pageHost = new URL(pageUrl).hostname.replace(/^www\./, '').toLowerCase()
+      pageBase = getBaseDomain(pageHost)
+    }
+  } catch(_) { return false }
+
+  const hostBase = getBaseDomain(host)
+
+  // 1. Se stesso dominio base della pagina → SEMPRE permetti
+  // Es: gazzettaobjects.it richiesto da gazzetta.it → stesso gruppo RCS
+  if (pageBase && hostBase === pageBase) return false
+
+  // 2. Whitelist hardcoded — infrastruttura critica
   if (WHITELIST.has(host)) return false
   const parts = host.split('.')
   for (let i = 1; i < parts.length; i++) {
     if (WHITELIST.has(parts.slice(i).join('.'))) return false
   }
 
-  // 2. Eccezioni @@ dalle liste
+  // 3. Eccezioni @@ dalle liste
   if (allowSet.has(host)) return false
+  for (let i = 1; i < parts.length - 1; i++) {
+    if (allowSet.has(parts.slice(i).join('.'))) return false
+  }
 
-  // 3. Blocca dominio puro dalla lista
+  // 4. Blocca solo se nella blocklist (tracker/ads noti)
   if (blockSet.has(host)) return true
   for (let i = 1; i < parts.length - 1; i++) {
     if (blockSet.has(parts.slice(i).join('.'))) return true
