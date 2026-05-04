@@ -3,6 +3,19 @@
 
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Blocca WebRTC IP leak — sovrascrive RTCPeerConnection
+const OrigRTC = window.RTCPeerConnection || window.webkitRTCPeerConnection
+if (OrigRTC) {
+  const FakeRTC = function(config) {
+    // Rimuovi STUN/TURN servers per prevenire IP leak
+    if (config && config.iceServers) config.iceServers = []
+    return new OrigRTC(config)
+  }
+  FakeRTC.prototype = OrigRTC.prototype
+  window.RTCPeerConnection = FakeRTC
+  if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = FakeRTC
+}
+
 // Esponi funzione per aprire nuovo tab (usata da auxclick iniettato)
 contextBridge.exposeInMainWorld('__zapOpenNewTab', (url) => {
   ipcRenderer.invoke('open-in-new-tab', { url })

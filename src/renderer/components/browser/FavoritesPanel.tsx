@@ -33,6 +33,22 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
     load()
   }
 
+  const importHTML = async () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.html,.htm'
+    input.onchange = async (e: any) => {
+      const file = e.target.files[0]
+      if (!file) return
+      const text = await file.text()
+      const imported = await (window as any).zap?.importFavoritesHtml({ html: text })
+      setMsg(`Importati ${imported?.length || 0} preferiti!`)
+      setTimeout(() => setMsg(''), 3000)
+      load()
+    }
+    input.click()
+  }
+
   const saveManual = async () => {
     if (!title.trim() || !url.trim()) { setMsg('Inserisci titolo e URL'); return }
     let u = url.trim()
@@ -60,6 +76,9 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
           </button>
           <button className="act-btn" onClick={() => setAdd(a => !a)}>
             + Manuale
+          </button>
+          <button className="act-btn" onClick={importHTML}>
+            📂 Importa HTML
           </button>
         </div>
 

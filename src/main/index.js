@@ -11,9 +11,10 @@ const v4v    = require('./value4value')
 
 const isDev = !app.isPackaged
 let mainWindow  = null
-let activeView  = null
-const tabUrls   = new Map()
+const views     = new Map()  // tabId → BrowserView
+const tabUrls   = new Map()  // tabId → url
 let activeTabId = null
+let activeView  = null
 const SHELL_H   = 114
 
 const UA_POOL = [
@@ -142,8 +143,27 @@ function createWindow() {
   })
   // Imposta UA a livello di sessione PRIMA di creare la view
   session.defaultSession.setUserAgent(currentUA)
-  activeView = createMainView()
+  const firstTabId = 'init'
+  const firstView = createMainView()
+  views.set(firstTabId, firstView)
+  activeView = firstView
   setupPrivacy(session.defaultSession)
+
+  // Blocca permissions privacy-invasive
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, cb, details) => {
+    const blocked = ['media', 'notifications', 'geolocation', 'push',
+                     'microphone', 'camera', 'speaker', 'midiSysex',
+                     'pointerLock', 'fullscreen', 'openExternal']
+    if (blocked.includes(permission)) return cb(false)
+    cb(true)
+  })
+
+  // Blocca anche permessi già concessi
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    const blocked = ['media', 'notifications', 'geolocation', 'push',
+                     'microphone', 'camera']
+    return !blocked.includes(permission)
+  })
   bl.init((size) => {
     mainWindow?.webContents.send('blocklist-ready', { size })
     console.log(`[Blocklist] ${size.toLocaleString()} domini pronti`)
@@ -189,23 +209,23 @@ ipcMain.on('win-close',    () => mainWindow?.close())
 
 // Tabs
 ipcMain.handle('tab-create', (_, { tabId }) => {
+  // Crea nuova BrowserView per questo tab
+  const view = createMainView()
+  views.set(tabId, view)
   tabUrls.set(tabId, '')
   activeTabId = tabId
-  if (mainWindow && activeView) {
-    try { mainWindow.removeBrowserView(activeView); console.log('[tab-create] view rimossa') } catch(e) { console.log('[tab-create] errore rimozione:', e.message) }
-  }
-  return { ok:true }
+  activeView = view
+  showView()
+  mainWindow?.webContents.send('tab-switched', { tabId })
+  return { ok: true }
 })
 ipcMain.handle('tab-switch', (_, { tabId }) => {
-  const url = tabUrls.get(tabId) || ''
+  const view = views.get(tabId)
+  if (!view) return { ok: false }
   activeTabId = tabId
-  if (url && url !== 'zap://newtab') {
-    showView()
-    setTimeout(() => activeView.webContents.loadURL(url).catch(() => {}), 50)
-  } else {
-    hideView()
-  }
-  return { ok:true }
+  activeView = view
+  showView()
+  return { ok: true }
 })
 ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   let u = url.trim()
@@ -303,6 +323,10 @@ ipcMain.handle('decode-invoice',   (_, {bolt11}) => nwc.decodeInvoice(bolt11))
 
 // Favorites
 ipcMain.handle('get-favorites',   () => DB.getFavorites())
+ipcMain.handle('import-favorites-html', (_, { html }) => {
+  return DB.importFavoritesFromHTML(DB, html)
+})
+
 ipcMain.handle('add-favorite',    (_, args) => DB.addFavorite(args))
 ipcMain.handle('remove-favorite', (_, {id}) => DB.removeFavorite(id))
 
@@ -342,6 +366,11 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
   event.preventDefault()
   callback(true)  // ignora errore e carica ugualmente
 })
+
+// Attiva DNS over HTTPS via Cloudflare
+app.commandLine.appendSwitch('host-resolver-rules', '')
+app.commandLine.appendSwitch('dns-over-https-templates', 'https://cloudflare-dns.com/dns-query')
+app.commandLine.appendSwitch('enable-features', 'DnsOverHttps')
 
 app.whenReady().then(createWindow)
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

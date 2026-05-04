@@ -165,3 +165,25 @@ module.exports = {
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   _db: () => db,
 }
+
+// Import preferiti da HTML (formato NETSCAPE-Bookmark-File)
+function importFavoritesFromHTML(DB, html) {
+  const results = []
+  // Regex per estrarre link dai bookmark HTML
+  const linkRe = /<A\s+[^>]*HREF="([^"]+)"[^>]*>([^<]+)<\/A>/gi
+  let match
+  while ((match = linkRe.exec(html)) !== null) {
+    const url   = match[1].trim()
+    const title = match[2].trim()
+    if (url.startsWith('http') && title) {
+      try {
+        DB._db().prepare(`INSERT OR IGNORE INTO favorites (url, title, favicon, created_at)
+          VALUES (?, ?, NULL, ?)`).run(url, title, Math.floor(Date.now()/1000))
+        results.push({ url, title })
+      } catch(_) {}
+    }
+  }
+  return results
+}
+
+module.exports.importFavoritesFromHTML = importFavoritesFromHTML

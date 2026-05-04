@@ -8,9 +8,9 @@ export interface Tab {
   loading: boolean
 }
 
-function makeTab(url = 'zap://newtab'): Tab {
+function makeTab(url = 'zap://newtab', id?: string): Tab {
   return {
-    id: crypto.randomUUID(),
+    id: id || crypto.randomUUID(),
     url,
     title: url === 'zap://newtab' ? 'New Tab' : url,
     loading: false,
