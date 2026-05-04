@@ -108,6 +108,8 @@ function setupPrivacy(ses) {
       mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
       return cb({ cancel: true })
     }
+    // Controlla anche ALWAYS_BLOCK — non passa per shouldBlock
+
     cb({})
   })
   ses.webRequest.onBeforeSendHeaders((details, cb) => {
