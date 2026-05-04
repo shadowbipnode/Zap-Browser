@@ -138,6 +138,7 @@ const WHITELIST = new Set([
 ])
 
 let blockSet    = new Set()
+let cosmeticRules = []  // selettori CSS da nascondere
 let allowSet    = new Set()
 let initialized = false
 let blockedCount = 0
@@ -181,7 +182,7 @@ function parseList(text) {
       }
     }
   }
-  return { domains, allow }
+  return { domains, allow, cosmeticSelectors: domains.cosmeticSelectors || [] }
 }
 
 function loadCache(name) {
@@ -201,16 +202,18 @@ function saveCache(name, text) {
 function applyResults(results) {
   const total = new Set()
   const allow = new Set()
+  const cosmetic = []
   for (const r of results) {
     r.domains.forEach(d => total.add(d))
     r.allow.forEach(d => allow.add(d))
+    if (r.cosmeticSelectors) cosmetic.push(...r.cosmeticSelectors)
   }
-  // Rimuovi eccezioni @@ dalla blocklist
   for (const d of allow) total.delete(d)
-  // Rimuovi anche tutti i domini della WHITELIST
   for (const d of WHITELIST) total.delete(d)
   blockSet = total
   allowSet = allow
+  cosmeticRules = [...new Set(cosmetic)]  // dedup
+  console.log(`[Blocklist] Regole cosmetic: ${cosmeticRules.length}`)
 }
 
 async function init(onReady) {
@@ -307,4 +310,9 @@ function getBlockedCount()  { return blockedCount }
 function getListSize()      { return blockSet.size }
 function isReady()          { return initialized }
 
-module.exports = { init, shouldBlock, incrementBlocked, getBlockedCount, getListSize, isReady }
+function getCosmeticCSS() {
+  if (cosmeticRules.length === 0) return ''
+  return cosmeticRules.join(', ') + ' { display: none !important; }'
+}
+
+module.exports = { init, shouldBlock, incrementBlocked, getBlockedCount, getListSize, isReady, getCosmeticCSS }

@@ -26,7 +26,9 @@ export default function BrowserPage() {
   const [pageNostr, setPageNostr] = useState(false)
   const [v4vInfo,   setV4vInfo]   = useState<any>(null)
   const [blocklistSize, setBlocklistSize] = useState(0)
-  const [paying, setPaying]     = useState(false)
+  const [paying, setPaying]       = useState(false)
+  const [suggestions, setSuggestions] = useState<any[]>([])
+  const [showSuggest, setShowSuggest] = useState(false)
 
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
   const isNew = !activeTab?.url || activeTab.url === 'zap://newtab' || activeTab.url === '' || activeTab.url === ''
@@ -51,6 +53,9 @@ export default function BrowserPage() {
       if (data.tabId === activeId && data.url) setAddrVal(data.url)
     })
     window.zap?.on('blocked-count', (n: number) => setBlocked(n))
+    window.zap?.on('open-new-tab', ({ url }: any) => {
+      handleNewTab(url)
+    })
     window.zap?.on('payment-detected', (data: any) => setPayment(data))
   }, [activeId])
 
@@ -97,8 +102,40 @@ export default function BrowserPage() {
     })
   }, [activeId, updateTab])
 
+  const handleAddrInput = async (val: string) => {
+    setAddrVal(val)
+    if (val.length < 2) { setSuggestions([]); setShowSuggest(false); return }
+    try {
+      const hist = await (window as any).zap?.getHistory({ limit: 500 }) || []
+      const q = val.toLowerCase()
+      // Dedup per dominio — mostra solo un risultato per dominio
+      const seen = new Set<string>()
+      const found: any[] = []
+      for (const h of hist) {
+        try {
+          const domain = new URL(h.url).hostname
+          if (!seen.has(domain) && (
+            domain.toLowerCase().includes(q) ||
+            h.title?.toLowerCase().includes(q) ||
+            h.url?.toLowerCase().includes(q)
+          )) {
+            seen.add(domain)
+            // Mostra homepage del dominio, non la pagina specifica
+            const homeUrl = new URL(h.url).origin
+            found.push({ ...h, url: homeUrl, title: domain })
+          }
+        } catch(_) {}
+        if (found.length >= 7) break
+      }
+      setSuggestions(found)
+      setShowSuggest(found.length > 0)
+    } catch(e) { console.error('[history] errore:', e) }
+  }
+
   const handleAddrKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') { setShowSuggest(false); return }
     if (e.key !== 'Enter') return
+    setShowSuggest(false)
     const v = addrVal.trim()
     // Detect Lightning invoice or Cashu token
     if (v.toLowerCase().startsWith('lnbc') || v.toLowerCase().startsWith('lntb')) {
@@ -192,11 +229,12 @@ export default function BrowserPage() {
           <span className="addr-icon">{secIcon()}</span>
           <input className="addr-input"
             value={addrVal}
-            onChange={e => setAddrVal(e.target.value)}
+            onChange={e => handleAddrInput(e.target.value)}
             onKeyDown={handleAddrKey}
             onFocus={e => e.target.select()}
             placeholder="Cerca o inserisci URL, invoice Lightning, token Cashu..."
             spellCheck={false}
+            autoFocus
           />
         </div>
 
@@ -276,6 +314,34 @@ export default function BrowserPage() {
         )}
         {/* When not new tab, BrowserView renders here (injected by Electron) */}
         {!isNew && <div style={{ flex:1 }} />}
+
+        {/* Suggestions dropdown */}
+        {showSuggest && (
+          <div style={{
+            position:'fixed', top:114, left:0, right:panel?320:0,
+            background:'var(--bg-1)', border:'1px solid var(--b1)',
+            zIndex:9999, boxShadow:'0 8px 32px rgba(0,0,0,.5)',
+            maxHeight:320, overflowY:'auto',
+          }}>
+            {suggestions.map((s: any, i: number) => (
+              <div key={i} style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'9px 16px', cursor:'pointer',
+                borderBottom:'1px solid var(--b0)',
+              }}
+                onMouseEnter={e=>(e.currentTarget.style.background='var(--bg-3)')}
+                onMouseLeave={e=>(e.currentTarget.style.background='')}
+                onClick={()=>{ setShowSuggest(false); setAddrVal(s.url); handleNavigate(s.url) }}
+              >
+                <span>🕑</span>
+                <div style={{flex:1,overflow:'hidden'}}>
+                  <div style={{fontSize:12.5,fontWeight:600,color:'var(--t0)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.title||s.url}</div>
+                  <div style={{fontSize:10.5,color:'var(--t2)',fontFamily:'var(--mono)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.url}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Side panel */}
         {panel && (

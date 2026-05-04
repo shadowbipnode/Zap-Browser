@@ -3,6 +3,11 @@
 
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Esponi funzione per aprire nuovo tab (usata da auxclick iniettato)
+contextBridge.exposeInMainWorld('__zapOpenNewTab', (url) => {
+  ipcRenderer.invoke('open-in-new-tab', { url })
+})
+
 // Esponi window.nostr ai siti web (NIP-07)
 contextBridge.exposeInMainWorld('nostr', {
   getPublicKey: () => ipcRenderer.invoke('nostr-get-pubkey-nip07'),

@@ -156,6 +156,13 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.maximize()
     mainWindow.show()
+    // Forza focus sulla barra URL — la BrowserView altrimenti lo ruba
+    setTimeout(() => {
+      mainWindow?.webContents.focus()
+      mainWindow?.webContents.executeJavaScript(`
+        document.querySelector('.addr-input')?.focus()
+      `).catch(() => {})
+    }, 500)
   })
 
   mainWindow.webContents.on('did-finish-load', () => {
@@ -164,6 +171,14 @@ function createWindow() {
     if (initialized) nwc.reconnectFromDB(DB).catch(() => {})
   })
 }
+
+// Apri link in nuovo tab (tasto centrale mouse)
+
+
+// Apri link in nuovo tab (tasto centrale mouse)
+ipcMain.handle('open-in-new-tab', (_, { url }) => {
+  mainWindow?.webContents.send('open-new-tab', { url })
+})
 
 // Window
 ipcMain.on('win-minimize', () => mainWindow?.minimize())
@@ -318,6 +333,12 @@ ipcMain.handle('reset-browser', () => {
   const dbPath = path.join(app.getPath('userData'), 'zap.db')
   try { require('fs').unlinkSync(dbPath) } catch(_) {}
   return { ok:true }
+})
+
+// Ignora errori certificato SSL (siti con cert self-signed o scaduto)
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  event.preventDefault()
+  callback(true)  // ignora errore e carica ugualmente
 })
 
 app.whenReady().then(createWindow)
