@@ -4,7 +4,7 @@
 const bip39 = require('bip39')
 
 function generateMnemonic() {
-  return bip39.generateMnemonic(256).split(' ') // 24 words — array
+  return bip39.generateMnemonic(256).split(' ')
 }
 
 function validateMnemonic(words) {

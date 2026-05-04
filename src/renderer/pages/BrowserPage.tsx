@@ -76,9 +76,12 @@ export default function BrowserPage() {
 
   // Switch tab
   const handleSwitchTab = useCallback((id: string) => {
+    const tab = tabs.find(t => t.id === id)
+    const url = (!tab?.url || tab.url === 'zap://newtab') ? '' : tab.url
     setActive(id)
-    window.zap?.tabSwitch({ tabId: id })
-  }, [setActive])
+    setAddrVal(url)
+    window.zap?.tabSwitch({ tabId: id, url })
+  }, [setActive, tabs])
 
   // Close tab
   const handleCloseTab = useCallback((id: string) => {

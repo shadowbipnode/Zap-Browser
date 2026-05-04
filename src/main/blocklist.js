@@ -1,4 +1,7 @@
 'use strict'
+// Zap Browser — Ad Block Engine v2
+// Approccio conservativo: blocca solo domini puri di tracker/ads noti
+// Non blocca CDN, risorse, immagini di siti legittimi
 
 const fs    = require('fs')
 const path  = require('path')
@@ -12,65 +15,124 @@ const LISTS = [
   { name: 'ublock-privacy', url: 'https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt' },
 ]
 
-// Domini sempre permessi — CDN critici, infrastruttura, news
+// Domini SEMPRE permessi — mai bloccare
+// Include CDN globali, news, immagini, font ecc.
 const WHITELIST = new Set([
-  // Google infra (non ads)
-  'gstatic.com','googleapis.com','googlevideo.com','googleusercontent.com',
+  // Google infra
+  'google.com','google.it','google.co.uk','google.de','google.fr','google.es',
+  'google.com.br','google.ca','google.com.au','google.co.jp','google.nl',
+  'googleapis.com','gstatic.com','googlevideo.com','googleusercontent.com',
+  'googletagmanager.com', // permesso — blocchiamo solo i tracking ID nel path
   'fonts.googleapis.com','fonts.gstatic.com','accounts.google.com',
+  'ssl.gstatic.com','maps.googleapis.com','maps.gstatic.com',
   // YouTube
-  'youtube.com','ytimg.com','ggpht.com','youtube-nocookie.com',
-  // CDN globali
+  'youtube.com','ytimg.com','ggpht.com','youtube-nocookie.com','youtu.be',
+  // CDN globali critici
   'cloudflare.com','cdnjs.cloudflare.com','cloudflare-dns.com',
-  'fastly.net','akamai.net','akamaized.net','akamaihd.net',
-  'jsdelivr.net','unpkg.com','bootstrapcdn.com',
-  'cloudfront.net','amazonaws.com','awsstatic.com',
-  'stackpath.com','stackpathdns.com',
-  // Font
-  'typekit.net','typekit.com','use.typekit.net',
-  'use.fontawesome.com','fontawesome.com',
+  'fastly.net','fastlylb.net',
+  'akamai.net','akamaized.net','akamaihd.net','akamai.com',
+  'edgesuite.net','edgekey.net',
+  'jsdelivr.net','unpkg.com',
+  'bootstrapcdn.com','maxcdn.bootstrapcdn.com',
+  'cloudfront.net','amazonaws.com','awsstatic.com','aws.amazon.com',
+  'stackpath.com','stackpathdns.com','bootstrapcdn.com',
+  // Font e asset
+  'typekit.net','typekit.com','use.typekit.net','p.typekit.net',
+  'use.fontawesome.com','fontawesome.com','fa.com',
+  'fonts.com','monotype.com',
+  // Immagini e media CDN
+  'imgur.com','imageshack.com','photobucket.com',
+  'gravatar.com','wp.com','wordpress.com','wordpress.org',
+  'twimg.com','pbs.twimg.com',
+  'cdninstagram.com','fbcdn.net',
+  'redd.it','redditmedia.com','redditstatic.com','reddituploads.com',
   // Video player
   'jwplatform.com','jwpcdn.com','jwplayer.com',
-  'brightcove.com','brightcove.net',
-  'vimeo.com','vimeocdn.com',
-  // Social (contenuto, non tracking)
-  'twimg.com','cdninstagram.com',
-  // CMS e blog
-  'wp.com','wordpress.com','wordpress.org','gravatar.com',
-  // Italiani news CDN
-  'gedi.it','repstatic.it','gedidigital.it','gelocal.it',
-  'rcs.it','rcsobjects.it','corriere.it',
-  'mediaset.it','mediasetplay.mediaset.it','digitalia.fm',
-  'rai.it','rainews.it','raiplaysound.it',
-  'virgilio.it','libero.it','italiaonline.it',
-  'gazzetta.it','sport.sky.it','sky.it','skytg24.it',
-  'lastampa.it','ilsole24ore.com','ilsole24ore.it',
-  'ansa.it','tgcom24.mediaset.it','fanpage.it',
-  'hdblog.it','hwupgrade.it','tom-hw.com',
-  // Internazionali news CDN
-  'bbci.co.uk','bbc.co.uk','bbc.com',
-  'guim.co.uk','guardianapps.co.uk','theguardian.com',
-  'turner.com','cnn.com','cnn.it',
-  'nyt.com','nytimes.com',
-  'wsj.net','wsj.com','dowjoneson.com',
-  'reuters.com','apnews.com',
-  'bloomberg.com','bwbx.io',
+  'brightcove.com','brightcove.net','boltdns.net',
+  'vimeo.com','vimeocdn.com','vhx.tv',
+  'dailymotion.com','dmcdn.net',
+  'twitch.tv','twitchsvc.net','jtvnw.net',
+  // Social
+  'twitter.com','x.com','t.co',
+  'instagram.com','facebook.com','fb.com',
+  'linkedin.com','licdn.com',
+  'reddit.com','redd.it',
+  'pinterest.com','pinimg.com',
+  'tiktok.com','tiktokcdn.com',
+  // News italiani — contenuto e CDN
+  'gedi.it','repstatic.it','gedidigital.it','gelocal.it','lediufficio.com',
+  'rcs.it','rcsobjects.it','corriere.it','gazzetta.it','cdnrcs.it',
+  'mediaset.it','mediasetplay.mediaset.it','digitalia.fm','tgcom24.it',
+  'rai.it','rainews.it','raiplaysound.it','raiplay.it','raicdn.it',
+  'virgilio.it','libero.it','italiaonline.it','alice.it','tin.it',
+  'sky.it','skytg24.it','skysport.it','skyinitalia.it',
+  'lastampa.it','ilsole24ore.com','sole24ore.com',
+  'ansa.it','ansa.com','ansait.cdn-immedia.net',
+  'fanpage.it','napolitoday.it','today.it',
+  'ilgiornale.it','ilfoglio.it','linkiesta.it',
+  'hdblog.it','hwupgrade.it','tom-hw.com','techradar.com',
+  'calcioefinanza.it','pianetamilan.it','tuttointer.net',
+  'gazzettadelsud.it','gazzettadiparma.it','gazzettadimodena.it',
+  // News internazionali — contenuto e CDN
+  'bbc.com','bbc.co.uk','bbci.co.uk','bbcimg.co.uk',
+  'theguardian.com','guim.co.uk','guardianapps.co.uk',
+  'cnn.com','cnn.it','turner.com','tbs.com','hbo.com',
+  'nytimes.com','nyt.com','nyti.ms',
+  'washingtonpost.com','wpengine.com',
+  'wsj.com','wsj.net','dowjoneson.com','barrons.com',
+  'reuters.com','thomsonreuters.com',
+  'apnews.com','ap.org',
+  'bloomberg.com','bwbx.io','bloomberg.net',
+  'forbes.com','forbesimg.com',
+  'businessinsider.com','insider.com',
+  'theverge.com','vox.com','voxmedia.com',
+  'wired.com','conde.io','condenast.com',
+  'techcrunch.com','aol.com',
+  'huffpost.com','buzzfeed.com','buzzfeednews.com',
+  'vice.com','vice.media',
+  'politico.com','politico.eu',
+  'lemonde.fr','lefigaro.fr','liberation.fr',
+  'elpais.com','elmundo.es','elconfidencial.com',
+  'spiegel.de','zeit.de','faz.net',
+  'correiobraziliense.com.br','globo.com','g1.com.br',
   // Dev e tech
-  'github.com','githubusercontent.com','githubassets.com',
-  'stackoverflow.com','sstatic.net',
+  'github.com','githubusercontent.com','githubassets.com','github.io',
+  'gitlab.com','bitbucket.org',
+  'stackoverflow.com','sstatic.net','stackexchange.com',
+  'npmjs.com','npmjs.org','yarnpkg.com',
+  'pypi.org','python.org',
+  'developer.mozilla.org','mozilla.org','firefox.com',
+  // E-commerce (immagini prodotti)
+  'amazon.com','amazon.it','amazon.co.uk','amazon.de',
+  'ssl-images-amazon.com','media-amazon.com','images-amazon.com',
+  'ebay.com','ebayimg.com','ebaystatic.com',
+  // Mappe
+  'openstreetmap.org','tile.openstreetmap.org',
+  'here.com','mapbox.com','mapboxgl.com',
   // Browser e OS
-  'mozilla.org','firefox.com','microsoft.com',
-  'apple.com','icloud.com','mzstatic.com',
-  'duckduckgo.com',
-  // Bitcoin/Nostr
-  'shadowbip.com','primal.net','damus.io',
-  'snort.social','stacker.news','mempool.space',
+  'microsoft.com','msftconnecttest.com','windowsupdate.com',
+  'apple.com','icloud.com','mzstatic.com','itunes.com',
+  'duckduckgo.com','ddg.gg',
+  // Bitcoin/Nostr/Crypto
+  'shadowbip.com','relay.shadowbip.com',
+  'primal.net','damus.io','snort.social',
+  'stacker.news','mempool.space','blockstream.info',
   'lnmarkets.com','bitrefill.com','robosats.com',
-  'coinos.io','minibits.cash',
+  'coinos.io','minibits.cash','legend.lnbits.com',
+  'bitcoin.org','bitcoinmagazine.com',
+  // Misc
+  'recaptcha.net','gstatic.com',
+  'disqus.com','disquscdn.com',
+  'cloudinary.com','imgix.net','imagekit.io',
+  'giphy.com','gfycat.com',
+  'spotify.com','scdn.co',
+  'soundcloud.com','sndcdn.com',
+  'medium.com','miro.medium.com',
 ])
 
-let blockSet     = new Set()
-let allowSet     = new Set()  // eccezioni @@ dalle liste
-let initialized  = false
+let blockSet    = new Set()
+let allowSet    = new Set()
+let initialized = false
 let blockedCount = 0
 
 function getDataDir() {
@@ -93,29 +155,21 @@ function download(url) {
 function parseList(text) {
   const domains = new Set()
   const allow   = new Set()
-
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim()
     if (!line || line.startsWith('!') || line.startsWith('#')) continue
-
-    // Eccezione @@ — dominio da permettere sempre
+    // Eccezioni @@ — sempre permetti
     if (line.startsWith('@@||') && line.includes('^')) {
-      const dom = line.slice(4).split('^')[0].split('/')[0].toLowerCase()
+      const dom = line.slice(4).split('^')[0].split('/')[0].split('$')[0].toLowerCase()
       if (dom.includes('.') && !dom.includes('*')) allow.add(dom)
       continue
     }
     if (line.startsWith('@@')) continue
-
-    // Skip CSS/element hiding
-    if (line.includes('##') || line.includes('#@#') ||
-        line.includes('#?#') || line.includes('#$#')) continue
-
-    // Dominio puro: ||example.com^
+    if (line.includes('##') || line.includes('#@#') || line.includes('#?#')) continue
+    // Dominio puro ||example.com^
     if (line.startsWith('||') && line.includes('^')) {
-      const body = line.slice(2)
-      const dom  = body.split('^')[0].split('/')[0].split('$')[0].toLowerCase()
-      if (dom.includes('.') && !dom.includes('*') &&
-          !dom.includes(' ') && dom.length > 4) {
+      const dom = line.slice(2).split('^')[0].split('/')[0].split('$')[0].toLowerCase()
+      if (dom.includes('.') && !dom.includes('*') && !dom.includes(' ') && dom.length > 4) {
         domains.add(dom)
       }
     }
@@ -144,10 +198,12 @@ function applyResults(results) {
     r.domains.forEach(d => total.add(d))
     r.allow.forEach(d => allow.add(d))
   }
-  // Rimuovi dalla blocklist i domini nelle eccezioni @@
+  // Rimuovi eccezioni @@ dalla blocklist
   for (const d of allow) total.delete(d)
-  blockSet   = total
-  allowSet   = allow
+  // Rimuovi anche tutti i domini della WHITELIST
+  for (const d of WHITELIST) total.delete(d)
+  blockSet = total
+  allowSet = allow
 }
 
 async function init(onReady) {
@@ -195,7 +251,7 @@ function shouldBlock(url) {
   try { host = new URL(url).hostname.replace(/^www\./, '').toLowerCase() }
   catch(_) { return false }
 
-  // 1. Whitelist hardcoded — mai bloccare
+  // 1. Whitelist — mai bloccare
   if (WHITELIST.has(host)) return false
   const parts = host.split('.')
   for (let i = 1; i < parts.length; i++) {
@@ -205,7 +261,7 @@ function shouldBlock(url) {
   // 2. Eccezioni @@ dalle liste
   if (allowSet.has(host)) return false
 
-  // 3. Blocca dominio puro
+  // 3. Blocca dominio puro dalla lista
   if (blockSet.has(host)) return true
   for (let i = 1; i < parts.length - 1; i++) {
     if (blockSet.has(parts.slice(i).join('.'))) return true
