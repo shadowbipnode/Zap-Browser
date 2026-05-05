@@ -1,6 +1,6 @@
 {
   "name": "zap-browser",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Privacy-first Bitcoin browser with Lightning, Liquid, Cashu and Nostr",
   "main": "src/main/index.js",
   "scripts": {
@@ -39,6 +39,7 @@
     "artifactName": "${productName}-${version}.${ext}"
   },
   "dependencies": {
+    "@cashu/cashu-ts": "^2.5.3",
     "@noble/hashes": "^1.4.0",
     "@noble/secp256k1": "^2.1.0",
     "axios": "^1.16.0",

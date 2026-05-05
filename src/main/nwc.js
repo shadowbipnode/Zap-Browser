@@ -149,9 +149,11 @@ function decodeInvoice(bolt11) {
   } catch(_) { return { paymentRequest:bolt11, amountMsat:0, description:'', expiry:3600 } }
 }
 
-function disconnect() {
+function disconnect(DB) {
   if (activeWs) { try { activeWs.close() } catch(_) {} activeWs = null }
   activeConn = null
+  // Cancella connessione attiva dal DB
+  if (DB) DB._db().prepare('UPDATE nwc_connections SET active=0').run()
   return { ok: true }
 }
 

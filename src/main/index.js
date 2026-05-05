@@ -8,6 +8,7 @@ const nwc    = require('./nwc')
 const bl     = require('./blocklist')
 const doh    = require('./doh')
 const v4v    = require('./value4value')
+const cashu  = require('./cashu')
 
 const isDev = !app.isPackaged
 let mainWindow  = null
