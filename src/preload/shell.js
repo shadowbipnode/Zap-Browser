@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('zap', {
   nostrSignEvent:     (a) => ipcRenderer.invoke('nostr-sign-event', a),
   nostrGetPubkey:     () => ipcRenderer.invoke('nostr-get-pubkey'),
 
+  nwcDisconnect: () => ipcRenderer.invoke('nwc-disconnect'),
   nwcConnect:      (a) => ipcRenderer.invoke('nwc-connect', a),
   nwcDisconnect:   () => ipcRenderer.invoke('nwc-disconnect'),
   nwcIsConnected:  () => ipcRenderer.invoke('nwc-is-connected'),

@@ -91,7 +91,17 @@ function NWCTab() {
 
   return (
     <div>
-      <div className="nwc-bar connected">⚡ Nodo connesso</div>
+      <div className="nwc-bar connected" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <span>⚡ Nodo connesso</span>
+        <button onClick={async()=>{
+          await (window as any).zap?.nwcDisconnect?.()
+          setConnected(false)
+          setBalance(0)
+        }} style={{
+          background:'none',border:'1px solid var(--red)',color:'var(--red)',
+          borderRadius:'var(--r-sm)',padding:'2px 8px',cursor:'pointer',fontSize:11
+        }}>✕ Disconnetti</button>
+      </div>
       <div className="bal-card">
         <div className="bal-lbl">Saldo Lightning</div>
         <div className="bal-num">{balance.toLocaleString()}</div>

@@ -3,7 +3,7 @@
 
 const WebSocket = require('ws')
 const crypto    = require('crypto')
-const { getPublicKey, finalizeEvent, nip04 } = require('nostr-tools')
+const { getPublicKey, getSignature, getEventHash, nip04 } = require('nostr-tools')
 const { hexToBytes } = require('@noble/hashes/utils')
 
 let activeWs     = null
@@ -39,6 +39,7 @@ function openWs(relayUrl, walletPubkey, secretHex) {
     ws.on('message', async (data) => {
       try {
         const msg = JSON.parse(data.toString())
+        console.log('[NWC] messaggio relay:', JSON.stringify(msg).slice(0,120))
         if (msg[0] !== 'EVENT') return
         const event = msg[2]
         if (event.kind !== 23195) return
@@ -70,15 +71,24 @@ async function nwcRequest(method, params = {}) {
   const { wallet_pubkey, secret } = activeConn
   const content   = JSON.stringify({ method, params })
   const encrypted = await nip04.encrypt(secret, wallet_pubkey, content)
-  const event = finalizeEvent({
-    kind: 23194, created_at: Math.floor(Date.now()/1000),
-    tags: [['p', wallet_pubkey]], content: encrypted,
-  }, hexToBytes(secret))
+  const pubkey = getPublicKey(hexToBytes(secret))
+  const template = {
+    kind: 23194,
+    created_at: Math.floor(Date.now()/1000),
+    tags: [['p', wallet_pubkey]],
+    content: encrypted,
+    pubkey,
+  }
+  template.id  = getEventHash(template)
+  template.sig = getSignature(template, secret)
+  const event  = template
   return new Promise((resolve, reject) => {
     const key   = method + '_' + Date.now()
     const timer = setTimeout(() => { pendingCalls.delete(key); reject(new Error(`Timeout ${method}`)) }, 15000)
     pendingCalls.set(key, { resolve, reject, timer })
-    activeWs.send(JSON.stringify(['EVENT', event]))
+    const payload = JSON.stringify(['EVENT', event])
+    console.log('[NWC] invio evento:', payload.slice(0, 200))
+    activeWs.send(payload)
   })
 }
 
@@ -137,6 +147,12 @@ function decodeInvoice(bolt11) {
     const mult = { m:100000000, u:100000, n:100, p:0.1 }[match[2]] || 100000000000
     return { paymentRequest:bolt11, amountMsat:Math.floor(parseInt(match[1])*mult), description:'', expiry:3600 }
   } catch(_) { return { paymentRequest:bolt11, amountMsat:0, description:'', expiry:3600 } }
+}
+
+function disconnect() {
+  if (activeWs) { try { activeWs.close() } catch(_) {} activeWs = null }
+  activeConn = null
+  return { ok: true }
 }
 
 module.exports = { connect, disconnect, isConnected, getBalance, payInvoice, makeInvoice, decodeInvoice, reconnectFromDB }
