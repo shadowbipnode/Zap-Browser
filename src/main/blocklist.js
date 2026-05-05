@@ -18,127 +18,60 @@ const LISTS = [
 // Domini SEMPRE permessi — mai bloccare
 // Include CDN globali, news, immagini, font ecc.
 const WHITELIST = new Set([
-  // Google infra
-  'google.com','google.it','google.co.uk','google.de','google.fr','google.es',
-  'google.com.br','google.ca','google.com.au','google.co.jp','google.nl',
-  'googleapis.com','gstatic.com','googlevideo.com','googleusercontent.com',
-  'googletagmanager.com', // permesso — blocchiamo solo i tracking ID nel path
-  'fonts.googleapis.com','fonts.gstatic.com','accounts.google.com',
-  'ssl.gstatic.com','maps.googleapis.com','maps.gstatic.com',
-  // YouTube
-  'youtube.com','ytimg.com','ggpht.com','youtube-nocookie.com','youtu.be',
-  // CDN globali critici
-  'cloudflare.com','cdnjs.cloudflare.com','cloudflare-dns.com',
-  'fastly.net','fastlylb.net',
-  'akamai.net','akamaized.net','akamaihd.net','akamai.com',
-  'edgesuite.net','edgekey.net',
+  // Solo infrastruttura critica — CDN, font, browser
+  'gstatic.com','fonts.googleapis.com','fonts.gstatic.com',
+  'accounts.google.com','ssl.gstatic.com',
+  'cloudflare.com','cdnjs.cloudflare.com',
+  'fastly.net','akamai.net','akamaized.net','akamaihd.net',
   'jsdelivr.net','unpkg.com',
-  'bootstrapcdn.com','maxcdn.bootstrapcdn.com',
-  'cloudfront.net','amazonaws.com','awsstatic.com','aws.amazon.com',
-  'stackpath.com','stackpathdns.com','bootstrapcdn.com',
-  // Font e asset
-  'typekit.net','typekit.com','use.typekit.net','p.typekit.net',
-  'use.fontawesome.com','fontawesome.com','fa.com',
-  'fonts.com','monotype.com',
-  // Immagini e media CDN
-  'imgur.com','imageshack.com','photobucket.com',
-  'gravatar.com','wp.com','wordpress.com','wordpress.org',
-  'twimg.com','pbs.twimg.com',
-  'cdninstagram.com','fbcdn.net',
-  'redd.it','redditmedia.com','redditstatic.com','reddituploads.com',
-  // Video player
-  'jwplatform.com','jwpcdn.com','jwplayer.com',
-  'brightcove.com','brightcove.net','boltdns.net',
-  'vimeo.com','vimeocdn.com','vhx.tv',
-  'dailymotion.com','dmcdn.net',
-  'twitch.tv','twitchsvc.net','jtvnw.net',
-  // Social
-  'twitter.com','x.com','t.co',
-  'instagram.com','facebook.com','fb.com',
-  'linkedin.com','licdn.com',
-  'reddit.com','redd.it',
-  'pinterest.com','pinimg.com',
-  'tiktok.com','tiktokcdn.com',
-  // News italiani — contenuto e CDN
-  'gedi.it','repstatic.it','gedidigital.it','gelocal.it','lediufficio.com',
-  'rcs.it','rcsobjects.it','corriere.it','gazzetta.it','cdnrcs.it',
-  'mediaset.it','mediasetplay.mediaset.it','digitalia.fm','tgcom24.it',
-  'rai.it','rainews.it','raiplaysound.it','raiplay.it','raicdn.it',
-  'virgilio.it','libero.it','italiaonline.it','alice.it','tin.it',
-  'sky.it','skytg24.it','skysport.it','skyinitalia.it',
-  'lastampa.it','ilsole24ore.com','sole24ore.com',
-  'ansa.it','ansa.com','ansait.cdn-immedia.net',
-  'fanpage.it','napolitoday.it','today.it',
-  'ilgiornale.it','ilfoglio.it','linkiesta.it',
-  'hdblog.it','hwupgrade.it','tom-hw.com','techradar.com',
-  'calcioefinanza.it','pianetamilan.it','tuttointer.net',
-  'gazzettadelsud.it','gazzettadiparma.it','gazzettadimodena.it',
-  // News internazionali — contenuto e CDN
-  'bbc.com','bbc.co.uk','bbci.co.uk','bbcimg.co.uk',
-  'theguardian.com','guim.co.uk','guardianapps.co.uk',
-  'cnn.com','cnn.it','turner.com','tbs.com','hbo.com',
-  'nytimes.com','nyt.com','nyti.ms',
-  'washingtonpost.com','wpengine.com',
-  'wsj.com','wsj.net','dowjoneson.com','barrons.com',
-  'reuters.com','thomsonreuters.com',
-  'apnews.com','ap.org',
-  'bloomberg.com','bwbx.io','bloomberg.net',
-  'forbes.com','forbesimg.com',
-  'businessinsider.com','insider.com',
-  'theverge.com','vox.com','voxmedia.com',
-  'wired.com','conde.io','condenast.com',
-  'techcrunch.com','aol.com',
-  'huffpost.com','buzzfeed.com','buzzfeednews.com',
-  'vice.com','vice.media',
-  'politico.com','politico.eu',
-  'lemonde.fr','lefigaro.fr','liberation.fr',
-  'elpais.com','elmundo.es','elconfidencial.com',
-  'spiegel.de','zeit.de','faz.net',
-  'correiobraziliense.com.br','globo.com','g1.com.br',
-  // Dev e tech
-  'github.com','githubusercontent.com','githubassets.com','github.io',
-  'gitlab.com','bitbucket.org',
-  'stackoverflow.com','sstatic.net','stackexchange.com',
-  'npmjs.com','npmjs.org','yarnpkg.com',
-  'pypi.org','python.org',
-  'developer.mozilla.org','mozilla.org','firefox.com',
-  // E-commerce (immagini prodotti)
-  'amazon.com','amazon.it','amazon.co.uk','amazon.de',
-  'ssl-images-amazon.com','media-amazon.com','images-amazon.com',
-  'ebay.com','ebayimg.com','ebaystatic.com',
-  // Mappe
-  'openstreetmap.org','tile.openstreetmap.org',
-  'here.com','mapbox.com','mapboxgl.com',
-  // Browser e OS
-  'microsoft.com','msftconnecttest.com','windowsupdate.com',
-  'apple.com','icloud.com','mzstatic.com','itunes.com',
-  'duckduckgo.com','ddg.gg',
-  // Bitcoin/Nostr/Crypto
-  'shadowbip.com','relay.shadowbip.com',
-  'primal.net','damus.io','snort.social',
-  'stacker.news','mempool.space','blockstream.info',
-  'lnmarkets.com','bitrefill.com','robosats.com',
-  'coinos.io','minibits.cash','legend.lnbits.com',
-  'bitcoin.org','bitcoinmagazine.com',
-  // Immagini news e fotografie
-  'gettyimages.com','gettyimageslatam.com','gi-cdn.com',
-  'imagn.com','usatoday.com',
-  'zoonar.com','shutterstock.com','istockphoto.com',
-  'dreamstime.com','alamy.com',
-  'corrieredellosport.it','sport.sky.it',
-  'pianetabasket.com','sportface.it',
-  // Misc
-  'recaptcha.net','gstatic.com',
-  'disqus.com','disquscdn.com',
-  'cloudinary.com','imgix.net','imagekit.io',
-  'giphy.com','gfycat.com',
-  'spotify.com','scdn.co',
-  'soundcloud.com','sndcdn.com',
-  'medium.com','miro.medium.com',
+  'cloudfront.net','amazonaws.com',
+  'typekit.net','use.typekit.net',
+  'use.fontawesome.com',
+  'jwplatform.com','jwpcdn.com',
+  'vimeo.com','vimeocdn.com',
+  'github.com','githubusercontent.com',
+  'mozilla.org','apple.com','microsoft.com',
+  'duckduckgo.com',
+  // Bitcoin/Nostr
+  'shadowbip.com','primal.net','damus.io',
+  'snort.social','stacker.news','mempool.space',
 ])
 
 let blockSet    = new Set()
 let cosmeticRules = []  // selettori CSS da nascondere
+
+// Selettori hardcoded per ads comuni — funzionano su qualsiasi sito
+const HARDCODED_COSMETIC = [
+  // Google AdSense / DoubleClick
+  'ins.adsbygoogle',
+  'ins[data-ad-client]',
+  'ins[data-ad-slot]',
+  '.adsbygoogle',
+  'iframe[src*="doubleclick.net"]',
+  'iframe[src*="googlesyndication"]',
+  'iframe[src*="googleadservices"]',
+  'div[id^="google_ads_"]',
+  'div[id^="div-gpt-ad"]',
+  'div[class*="google-ad"]',
+  // Banner generici
+  'div[id*="banner-ad"]',
+  'div[class*="banner-ad"]',
+  'div[id*="ad-banner"]',
+  'div[class*="ad-banner"]',
+  'div[id*="advertisement"]',
+  'div[class*="advertisement"]',
+  'div[id*="leaderboard"]',
+  'div[class*="leaderboard"]',
+  // Outbrain/Taboola
+  'div[id^="outbrain"]',
+  'div[class*="outbrain"]',
+  'div[id^="taboola"]',
+  'div[class*="taboola"]',
+  // Slot generici
+  '[data-ad]',
+  '[data-advertisement]',
+  '[data-google-query-id]',
+]
 let allowSet    = new Set()
 let initialized = false
 let blockedCount = 0
@@ -161,8 +94,9 @@ function download(url) {
 }
 
 function parseList(text) {
-  const domains = new Set()
-  const allow   = new Set()
+  const domains    = new Set()
+  const allow      = new Set()
+  const cosmetic   = []
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim()
     if (!line || line.startsWith('!') || line.startsWith('#')) continue
@@ -173,16 +107,34 @@ function parseList(text) {
       continue
     }
     if (line.startsWith('@@')) continue
-    if (line.includes('##') || line.includes('#@#') || line.includes('#?#')) continue
-    // Dominio puro ||example.com^
+    // Regole cosmetic: ##.classe o ###id — nascondi elementi HTML
+    if (line.includes('##') && !line.startsWith('!') && !line.startsWith('@@')) {
+      const idx = line.indexOf('##')
+      const selector = line.slice(idx + 2).trim()
+      if (selector && !selector.includes(':has(') && !selector.includes(':-') &&
+          !selector.includes(':xpath') && selector.length < 200) {
+        cosmetic.push(selector)
+      }
+      continue
+    }
+    if (line.includes('#@#') || line.includes('#?#')) continue
+    // Dominio puro ||example.com^ — solo se NON ha path specifico
     if (line.startsWith('||') && line.includes('^')) {
-      const dom = line.slice(2).split('^')[0].split('/')[0].split('$')[0].toLowerCase()
-      if (dom.includes('.') && !dom.includes('*') && !dom.includes(' ') && dom.length > 4) {
-        domains.add(dom)
+      const afterPipes = line.slice(2)
+      const caretIdx   = afterPipes.indexOf('^')
+      const beforeCaret = afterPipes.slice(0, caretIdx)
+      // Se ha un path (contiene /) skip — es: ||gazzettaobjects.it^*/tracking/
+      // Solo domini puri senza path vengono bloccati
+      const hasPath = beforeCaret.includes('/')
+      if (!hasPath) {
+        const dom = beforeCaret.split('$')[0].toLowerCase()
+        if (dom.includes('.') && !dom.includes('*') && !dom.includes(' ') && dom.length > 4) {
+          domains.add(dom)
+        }
       }
     }
   }
-  return { domains, allow, cosmeticSelectors: domains.cosmeticSelectors || [] }
+  return { domains, allow, cosmeticSelectors: cosmetic }
 }
 
 function loadCache(name) {
@@ -311,8 +263,9 @@ function getListSize()      { return blockSet.size }
 function isReady()          { return initialized }
 
 function getCosmeticCSS() {
-  if (cosmeticRules.length === 0) return ''
-  return cosmeticRules.join(', ') + ' { display: none !important; }'
+  const all = [...HARDCODED_COSMETIC, ...cosmeticRules]
+  if (all.length === 0) return ''
+  return all.join(', ') + ' { display: none !important; visibility: hidden !important; }'
 }
 
 module.exports = { init, shouldBlock, incrementBlocked, getBlockedCount, getListSize, isReady, getCosmeticCSS }
