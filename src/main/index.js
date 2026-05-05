@@ -12,6 +12,7 @@ const v4v    = require('./value4value')
 const isDev = !app.isPackaged
 let mainWindow  = null
 let activeView  = null
+const tabViews  = new Map()
 const tabUrls   = new Map()
 let activeTabId = null
 let isSwitching = false
@@ -153,6 +154,7 @@ function createWindow() {
   // Imposta UA a livello di sessione PRIMA di creare la view
   session.defaultSession.setUserAgent(currentUA)
   activeView = createMainView()
+  // Il primo tab viene registrato quando arriva tab-create
   setupPrivacy(session.defaultSession)
   bl.init((size) => {
     mainWindow?.webContents.send('blocklist-ready', { size })
@@ -205,27 +207,29 @@ ipcMain.on('win-close',    () => mainWindow?.close())
 ipcMain.handle('tab-create', (_, { tabId }) => {
   tabUrls.set(tabId, '')
   activeTabId = tabId
-  if (mainWindow && activeView) {
-    try { mainWindow.removeBrowserView(activeView); console.log('[tab-create] view rimossa') } catch(e) { console.log('[tab-create] errore rimozione:', e.message) }
-  }
+  // Carica about:blank per pulire la view
+  showView()
+  activeView.webContents.loadURL('about:blank').catch(() => {})
   return { ok:true }
 })
 ipcMain.handle('tab-switch', (_, { tabId }) => {
-  const url = tabUrls.get(tabId) || ''
   activeTabId = tabId
-  if (url && url !== 'zap://newtab') {
-    showView()
-    const currentUrl = activeView.webContents.getURL()
-    if (currentUrl !== url) {
-      isSwitching = true
-      setTimeout(() => {
-        activeView.webContents.loadURL(url).catch(() => {}).finally(() => {
-          isSwitching = false
-        })
-      }, 50)
-    }
+  const view = tabViews.get(tabId)
+  if (view) {
+    activeView = view
+    const url = tabUrls.get(tabId) || ''
+    if (url && url !== 'zap://newtab') showView()
+    else hideView()
   } else {
-    hideView()
+    // Tab senza view dedicata (primo tab o tab legacy)
+    const url = tabUrls.get(tabId) || ''
+    if (url && url !== 'zap://newtab') {
+      showView()
+      const currentUrl = activeView.webContents.getURL()
+      if (currentUrl !== url) {
+        activeView.webContents.loadURL(url).catch(() => {})
+      }
+    } else hideView()
   }
   return { ok:true }
 })

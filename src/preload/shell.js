@@ -70,7 +70,7 @@ contextBridge.exposeInMainWorld('zap', {
   on: (channel, cb) => {
     const allowed = [
       'tab-updated','blocked-count','payment-detected','app-ready',
-      'tab-switched','page-features','v4v-detected','blocklist-ready','open-new-tab'
+      'tab-switched','page-features','v4v-detected','blocklist-ready','open-new-tab','tab-ready'
     ]
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
   },

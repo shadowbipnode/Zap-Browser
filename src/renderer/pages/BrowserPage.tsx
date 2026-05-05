@@ -97,16 +97,16 @@ export default function BrowserPage() {
   // Create a new tab
   const handleNewTab = useCallback((url?: string) => {
     const id = crypto.randomUUID()
-    console.log('[handleNewTab] creando tab id:', id, 'url:', url)
     addTab(url || 'zap://newtab', id)
     setActive(id)
     setAddrVal(url || '')
+    // Crea tab nel main e poi forza switch
     window.zap?.tabCreate({ tabId: id }).then(() => {
-      console.log('[handleNewTab] tabCreate OK, activeId ora:', id)
+      window.zap?.tabSwitch({ tabId: id })
+      if (url && url !== 'zap://newtab') {
+        setTimeout(() => window.zap?.tabNavigate({ tabId: id, url }), 100)
+      }
     })
-    if (url && url !== 'zap://newtab') {
-      setTimeout(() => window.zap?.tabNavigate({ tabId: id, url }), 200)
-    }
   }, [addTab, setActive])
 
   // Switch tab
