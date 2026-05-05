@@ -34,7 +34,7 @@ Zap Browser is an open-source desktop browser that unifies a full Chromium brows
 
 ## Features
 
-**Privacy & Security** — EasyList + EasyPrivacy + uBlock Origins parsed into 106,000+ domain block set, updated automatically every 24 hours. 12,000+ cosmetic CSS rules hide ad slots even when the domain can't be blocked. WebRTC disabled at both JS and permission-handler level — verified no-leak on browserleaks.com. User-Agent rotated every session from a pool of real browser strings. Push notifications, geolocation, camera and microphone permissions blocked by default. JS popups (alert/confirm/prompt) suppressed. DNS over HTTPS via Cloudflare.
+**Privacy & Security** — EasyList + EasyPrivacy + uBlock Origins parsed into 106,000+ domain block set, updated automatically every 24 hours. 12,000+ cosmetic CSS rules hide ad slots even when the domain can't be blocked. WebRTC disabled at both JS and permission-handler level — verified no-leak on browserleaks.com. User-Agent rotated every session from a pool of real browser strings. Push notifications, geolocation, camera and microphone permissions blocked by default. JS dialogs (alert, confirm, prompt) are currently suppressed as a temporary development simplification. This behavior is not final and will be replaced with a proper, secure and user-controlled dialog system (with per-site permissions) in future releases. 
 
 **Lightning (NWC)** — Connect any LND or CLN node via a `nostr+walletconnect://` connection string. Compatible with Alby, Zeus, Mutiny, Breez, Phoenix, LNbits. Communication runs over a real WebSocket to the configured Nostr relay with NIP-47 ECDH encryption. Pay invoices, create invoices, check balance, disconnect — all from inside the browser.
 
