@@ -252,6 +252,14 @@ ipcMain.handle('tab-close', (_, { tabId }) => {
   if (activeTabId===tabId) { hideView(); activeTabId=null }
   return { ok:true }
 })
+ipcMain.handle('tab-home', (_, { tabId }) => {
+  activeTabId = tabId
+  tabUrls.set(tabId, '')
+  // Nascondi la view — il renderer mostrerà la new tab page
+  hideView()
+  return { ok: true }
+})
+
 ipcMain.handle('tab-go-back',    () => activeView?.webContents.goBack())
 ipcMain.handle('tab-go-forward', () => activeView?.webContents.goForward())
 ipcMain.handle('tab-reload',     () => activeView?.webContents.reload())

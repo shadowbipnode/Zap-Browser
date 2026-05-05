@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('zap', {
   tabSwitch:   (a) => ipcRenderer.invoke('tab-switch', a),
   tabClose:    (a) => ipcRenderer.invoke('tab-close', a),
   tabNavigate: (a) => ipcRenderer.invoke('tab-navigate', a),
+  tabHome:    (a) => ipcRenderer.invoke('tab-home', a),
   tabBack:     (a) => ipcRenderer.invoke('tab-go-back', a),
   tabForward:  (a) => ipcRenderer.invoke('tab-go-forward', a),
   tabReload:   (a) => ipcRenderer.invoke('tab-reload', a),

@@ -257,6 +257,15 @@ export default function BrowserPage() {
         <button className="navbtn" onClick={() => window.zap?.tabReload({ tabId: activeId })}>↻</button>
 
         {/* Address bar */}
+        <button
+          onClick={() => {
+            setAddrVal('')
+            updateTab(activeId, { url: 'zap://newtab', title: 'New Tab' })
+            window.zap?.tabHome({ tabId: activeId })
+          }}
+          title="Home"
+          style={{ background:'none', border:'none', cursor:'pointer', color:'var(--t2)', fontSize:14, padding:'0 4px', flexShrink:0 }}
+        >🏠</button>
         <div className="addr-wrap" style={{ cursor:'text' }}>
           <span className="addr-icon">{secIcon()}</span>
           <input className="addr-input"
