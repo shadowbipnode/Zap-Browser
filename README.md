@@ -142,7 +142,7 @@ src/
 | Version | Focus |
 |---------|-------|
 | v0.3.3 (current) | NWC Lightning ✅, Cashu ecash ✅, Bookmarks bar ✅, History ✅, 106k adblock + 12k cosmetic ✅, WebRTC fix ✅ |
-| v0.4 | L-BTC via libwally, QR codes, LNURL-pay/auth, real DoH at Electron level |
+| v0.4 | L-BTC via libwally, QR codes, LNURL-pay/auth, real DoH at Electron level, proper JS dialog handling (alert/confirm/prompt) |
 | v0.5 | Canvas fingerprint randomization, encrypted history, proxy HTTP/SOCKS |
 | v0.6 | Windows build, optional Tor, Nostr DMs in-browser, Nostr feed on new tab |
 | v0.7 | Chrome extension API subset, themes, Nostr bookmark sync |
