@@ -17,7 +17,10 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
 
   useEffect(() => { load() }, [])
 
-  const load = () => (window as any).zap?.getFavorites().then(setFavs)
+  const load = () => {
+    (window as any).zap?.getFavorites().then(setFavs)
+    window.dispatchEvent(new Event('favorites-updated'))
+  }
 
   const saveCurrentPage = async () => {
     if (!currentUrl || currentUrl === 'zap://newtab') {

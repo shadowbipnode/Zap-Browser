@@ -1,6 +1,6 @@
 {
   "name": "zap-browser",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Privacy-first Bitcoin browser with Lightning, Liquid, Cashu and Nostr",
   "main": "src/main/index.js",
   "scripts": {

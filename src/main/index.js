@@ -14,7 +14,7 @@ let mainWindow  = null
 let activeView  = null
 const tabUrls   = new Map()
 let activeTabId = null
-const SHELL_H   = 114
+const SHELL_H   = 142  // titlebar(32) + tabbar(36) + toolbar(46) + favbar(28)
 
 const UA_POOL = [
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -314,6 +314,24 @@ ipcMain.handle('decode-invoice',   (_, {bolt11}) => nwc.decodeInvoice(bolt11))
 
 // Favorites
 ipcMain.handle('get-favorites',   () => DB.getFavorites())
+ipcMain.handle('import-favorites-html', (_, { html }) => {
+  const results = []
+  const linkRe = /<A[^>]+HREF="([^"]+)"[^>]*>([^<]+)<\/A>/gi
+  let match
+  while ((match = linkRe.exec(html)) !== null) {
+    const url   = match[1].trim()
+    const title = match[2].trim()
+    if (url.startsWith('http') && title) {
+      try {
+        DB._db().prepare('INSERT OR IGNORE INTO favorites (url,title,favicon,created_at) VALUES(?,?,NULL,?)')
+          .run(url, title, Math.floor(Date.now()/1000))
+        results.push({ url, title })
+      } catch(_) {}
+    }
+  }
+  return results
+})
+
 ipcMain.handle('add-favorite',    (_, args) => DB.addFavorite(args))
 ipcMain.handle('remove-favorite', (_, {id}) => DB.removeFavorite(id))
 

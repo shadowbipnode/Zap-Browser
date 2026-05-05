@@ -21,6 +21,9 @@ export default function BrowserPage() {
   const [privacy, setPrivacy]   = useState<any>(null)
   const [uaDrop, setUaDrop]     = useState(false)
   const [blocked,  setBlocked]   = useState(0)
+  const [favBar,      setFavBar]    = useState<any[]>([])
+  const [showFavBar,  setShowFavBar] = useState(() => localStorage.getItem('showFavBar') !== 'false')
+  const [favDropOpen, setFavDropOpen] = useState(false)
   const [currentUA, setCurrentUA] = useState('')
   const [payment, setPayment]   = useState<any>(null)
   const [pageNostr, setPageNostr] = useState(false)
@@ -36,10 +39,14 @@ export default function BrowserPage() {
   // Load privacy settings
   useEffect(() => {
     window.zap?.getPrivacy().then(setPrivacy)
+    const loadFavBar = () => window.zap?.getFavorites().then((f: any[]) => setFavBar(f || []))
+    loadFavBar()
+    window.addEventListener('favorites-updated', loadFavBar)
     window.zap?.getUAPool().then((pool: string[]) => {
       if (pool && pool.length > 0) setCurrentUA(pool[Math.floor(Math.random() * pool.length)])
     })
     window.zap?.getBlockedCount().then(setBlocked)
+    return () => window.removeEventListener('favorites-updated', loadFavBar)
   }, [])
 
   // Listen to events from main process
@@ -57,6 +64,22 @@ export default function BrowserPage() {
       handleNewTab(url)
     })
     window.zap?.on('payment-detected', (data: any) => setPayment(data))
+
+    // Navigate from history/bookmarks
+    const onNavigateTo = (e: any) => {
+      handleNavigate((e as CustomEvent).detail)
+      setPanel(null)
+    }
+    window.addEventListener('navigate-to', onNavigateTo)
+
+    // Toggle bookmarks bar
+    const onToggleFavBar = (e: any) => setShowFavBar((e as CustomEvent).detail)
+    window.addEventListener('toggle-favbar', onToggleFavBar)
+
+    return () => {
+      window.removeEventListener('navigate-to', onNavigateTo)
+      window.removeEventListener('toggle-favbar', onToggleFavBar)
+    }
   }, [activeId])
 
   // Sync address bar with active tab
@@ -92,6 +115,7 @@ export default function BrowserPage() {
     const url = (!tab?.url || tab.url === 'zap://newtab') ? '' : tab.url
     setActive(id)
     setAddrVal(url)
+    setShowSuggest(false)
     window.zap?.tabSwitch({ tabId: id, url })
   }, [setActive, tabs])
 
@@ -311,6 +335,75 @@ export default function BrowserPage() {
         </div>
       </div>
 
+      {/* ── Bookmarks bar ────────────────────────────────────────── */}
+      {showFavBar && favBar.length > 0 && (() => {
+        const MAX = 10
+        const visible = favBar.slice(0, MAX)
+        const hidden  = favBar.slice(MAX)
+        return (
+          <div style={{
+            display:'flex', alignItems:'center', gap:2,
+            padding:'2px 8px', borderBottom:'1px solid var(--b0)',
+            background:'var(--bg-1)', flexShrink:0,
+            WebkitAppRegion:'no-drag' as any, height:28, position:'relative',
+          }}>
+            {visible.map((f: any) => (
+              <button key={f.id} onClick={() => handleNavigate(f.url)}
+                title={f.url}
+                style={{
+                  background:'none', border:'none', cursor:'pointer',
+                  color:'var(--t0)', fontSize:11, padding:'2px 7px',
+                  borderRadius:'var(--r-sm)', whiteSpace:'nowrap',
+                  display:'flex', alignItems:'center', gap:3, flexShrink:0,
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
+                onMouseLeave={e => (e.currentTarget.style.background='none')}
+              >
+                🌐 {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
+              </button>
+            ))}
+            {hidden.length > 0 && (
+              <div style={{ position:'relative', marginLeft:'auto', flexShrink:0 }}>
+                <button
+                  onClick={() => setFavDropOpen(d => !d)}
+                  style={{
+                    background:'none', border:'none', cursor:'pointer',
+                    color:'var(--t2)', fontSize:12, padding:'2px 7px',
+                    borderRadius:'var(--r-sm)',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
+                  onMouseLeave={e => (e.currentTarget.style.background='none')}
+                >» {hidden.length}</button>
+                {favDropOpen && (
+                  <div style={{
+                    position:'absolute', top:24, right:0, zIndex:9999,
+                    background:'var(--bg-1)', border:'1px solid var(--b1)',
+                    borderRadius:'var(--r-md)', boxShadow:'0 8px 32px rgba(0,0,0,.4)',
+                    minWidth:220, maxHeight:300, overflowY:'auto',
+                  }}>
+                    {hidden.map((f: any) => (
+                      <button key={f.id}
+                        onClick={() => { handleNavigate(f.url); setFavDropOpen(false) }}
+                        style={{
+                          display:'block', width:'100%', textAlign:'left',
+                          background:'none', border:'none', cursor:'pointer',
+                          color:'var(--t0)', fontSize:12, padding:'8px 12px',
+                          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
+                        onMouseLeave={e => (e.currentTarget.style.background='none')}
+                      >
+                        🌐 {f.title || f.url}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* ── Browser body ─────────────────────────────────────────────── */}
       <div className="app-body">
         {/* New tab page (shown when tab is zap://newtab) */}
@@ -322,7 +415,9 @@ export default function BrowserPage() {
         {/* When not new tab, BrowserView renders here (injected by Electron) */}
         {!isNew && <div style={{ flex:1 }} />}
 
-        {/* Suggestions dropdown */}
+
+
+      {/* Suggestions dropdown */}
         {showSuggest && (
           <div style={{
             position:'fixed', top:114, left:0, right:panel?320:0,

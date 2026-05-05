@@ -170,8 +170,32 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
             </select>
 
             <div className="sec-title">{lang==='it'?'Dati browser':'Browser data'}</div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
+              padding:'10px 0',borderBottom:'1px solid var(--b0)',marginBottom:8}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--t0)'}}>
+                  {lang==='it'?'Barra preferiti':'Bookmarks bar'}
+                </div>
+                <div style={{fontSize:11,color:'var(--t2)'}}>
+                  {lang==='it'?'Mostra barra sotto la barra indirizzi':'Show bar below address bar'}
+                </div>
+              </div>
+              <button onClick={() => {
+                const cur = localStorage.getItem('showFavBar') !== 'false'
+                localStorage.setItem('showFavBar', String(!cur))
+                window.dispatchEvent(new CustomEvent('toggle-favbar', { detail: !cur }))
+              }} style={{
+                padding:'4px 12px', borderRadius:'var(--r-sm)', cursor:'pointer',
+                border:'1px solid var(--b1)', fontSize:11, fontWeight:600,
+                background: localStorage.getItem('showFavBar') !== 'false' ? 'var(--amber)' : 'var(--bg-3)',
+                color: localStorage.getItem('showFavBar') !== 'false' ? '#000' : 'var(--t2)',
+              }}>
+                {localStorage.getItem('showFavBar') !== 'false' ? (lang==='it'?'Attiva':'On') : (lang==='it'?'Disattiva':'Off')}
+              </button>
+            </div>
             {[
               {label:t('clearHistory'), desc:t('clearHistoryDesc'), action:()=>z()?.clearHistory()},
+
               {label:t('clearCookies'), desc:t('clearCookiesDesc'), action:()=>z()?.clearCookies()},
               {label:t('clearCache'),   desc:t('clearCacheDesc'),   action:()=>z()?.clearCache()},
             ].map(item=>(

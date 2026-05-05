@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('zap', {
 
   getFavorites:   () => ipcRenderer.invoke('get-favorites'),
   addFavorite:    (a) => ipcRenderer.invoke('add-favorite', a),
+  importFavoritesHtml: (a) => ipcRenderer.invoke('import-favorites-html', a),
   removeFavorite: (a) => ipcRenderer.invoke('remove-favorite', a),
 
   cashuGetBalance:  () => ipcRenderer.invoke('cashu-get-balance'),
