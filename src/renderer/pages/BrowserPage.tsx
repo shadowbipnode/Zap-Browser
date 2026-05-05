@@ -116,7 +116,8 @@ export default function BrowserPage() {
     setActive(id)
     setAddrVal(url)
     setShowSuggest(false)
-    window.zap?.tabSwitch({ tabId: id, url })
+    // Solo switch — NON navigare di nuovo
+    window.zap?.tabSwitch({ tabId: id })
   }, [setActive, tabs])
 
   // Close tab

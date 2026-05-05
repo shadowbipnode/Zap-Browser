@@ -14,6 +14,7 @@ let mainWindow  = null
 let activeView  = null
 const tabUrls   = new Map()
 let activeTabId = null
+let isSwitching = false
 const SHELL_H   = 142  // titlebar(32) + tabbar(36) + toolbar(46) + favbar(28)
 
 const UA_POOL = [
@@ -53,7 +54,9 @@ function createMainView() {
     }, 1500)
   })
   view.webContents.on('did-start-loading', () => {
-    if (activeTabId) mainWindow?.webContents.send('tab-updated', { tabId: activeTabId, loading: true })
+    if (activeTabId && !isSwitching) {
+      mainWindow?.webContents.send('tab-updated', { tabId: activeTabId, loading: true })
+    }
   })
   view.webContents.on('did-stop-loading', () => {
     if (!activeTabId) return
@@ -212,7 +215,15 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
   activeTabId = tabId
   if (url && url !== 'zap://newtab') {
     showView()
-    setTimeout(() => activeView.webContents.loadURL(url).catch(() => {}), 50)
+    const currentUrl = activeView.webContents.getURL()
+    if (currentUrl !== url) {
+      isSwitching = true
+      setTimeout(() => {
+        activeView.webContents.loadURL(url).catch(() => {}).finally(() => {
+          isSwitching = false
+        })
+      }, 50)
+    }
   } else {
     hideView()
   }

@@ -120,13 +120,15 @@ function parseList(text) {
     if (line.includes('#@#') || line.includes('#?#')) continue
     // Dominio puro ||example.com^ — solo se NON ha path specifico
     if (line.startsWith('||') && line.includes('^')) {
-      const afterPipes = line.slice(2)
-      const caretIdx   = afterPipes.indexOf('^')
+      const afterPipes  = line.slice(2)
+      const caretIdx    = afterPipes.indexOf('^')
       const beforeCaret = afterPipes.slice(0, caretIdx)
-      // Se ha un path (contiene /) skip — es: ||gazzettaobjects.it^*/tracking/
-      // Solo domini puri senza path vengono bloccati
-      const hasPath = beforeCaret.includes('/')
-      if (!hasPath) {
+      const afterCaret  = afterPipes.slice(caretIdx + 1)
+      // Skip se ha path PRIMA del ^ es: ||example.com/ads^
+      const hasPathBefore = beforeCaret.includes('/')
+      // Skip se ha path DOPO il ^ es: ||gazzetta.it^*/stats.php?
+      const hasPathAfter  = afterCaret.length > 0 && afterCaret[0] !== '$'
+      if (!hasPathBefore && !hasPathAfter) {
         const dom = beforeCaret.split('$')[0].toLowerCase()
         if (dom.includes('.') && !dom.includes('*') && !dom.includes(' ') && dom.length > 4) {
           domains.add(dom)
