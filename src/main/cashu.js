@@ -7,7 +7,7 @@ async function getCashu() {
 }
 
 async function listMints(DB) {
-  return DB._db().prepare('SELECT * FROM cashu_mints ORDER BY created_at DESC').all()
+  return DB._db().prepare('SELECT * FROM cashu_mints ORDER BY added_at DESC').all()
 }
 
 async function addMint(DB, { url }) {
@@ -15,8 +15,8 @@ async function addMint(DB, { url }) {
   const { CashuMint } = await getCashu()
   const mint = new CashuMint(url)
   await mint.getKeys()
-  DB._db().prepare('INSERT OR IGNORE INTO cashu_mints(url,name,active,created_at) VALUES(?,?,1,?)')
-    .run(url, url.replace('https://',''), Math.floor(Date.now()/1000))
+  DB._db().prepare('INSERT OR IGNORE INTO cashu_mints(url,active,added_at) VALUES(?,1,?)')
+    .run(url, Math.floor(Date.now()/1000))
   return { ok: true }
 }
 
@@ -41,8 +41,8 @@ async function receive(DB, { token }) {
   const newProofs = await wallet.receiveTokenEntry({ mint: mintUrl, proofs }, {})
   const db = DB._db()
   for (const p of newProofs) {
-    db.prepare('INSERT OR IGNORE INTO cashu_proofs(secret,amount,C,mint_url,spent,created_at) VALUES(?,?,?,?,0,?)')
-      .run(p.secret, p.amount, p.C, mintUrl, Math.floor(Date.now()/1000))
+    db.prepare('INSERT OR IGNORE INTO cashu_proofs(secret,amount,c,keyset_id,mint_url,spent,created_at) VALUES(?,?,?,?,?,0,?)')
+      .run(p.secret, p.amount, p.C, p.id || '', mintUrl, Math.floor(Date.now()/1000))
   }
   return { ok: true, amount: newProofs.reduce((s,p)=>s+p.amount,0) }
 }
@@ -58,8 +58,8 @@ async function send(DB, { amount, mintUrl }) {
   const db = DB._db()
   for (const p of allProofs) db.prepare('UPDATE cashu_proofs SET spent=1 WHERE secret=?').run(p.secret)
   for (const p of keep) {
-    db.prepare('INSERT OR IGNORE INTO cashu_proofs(secret,amount,C,mint_url,spent,created_at) VALUES(?,?,?,?,0,?)')
-      .run(p.secret, p.amount, p.C, mintUrl, Math.floor(Date.now()/1000))
+    db.prepare('INSERT OR IGNORE INTO cashu_proofs(secret,amount,c,keyset_id,mint_url,spent,created_at) VALUES(?,?,?,?,?,0,?)')
+      .run(p.secret, p.amount, p.C, p.id || '', mintUrl, Math.floor(Date.now()/1000))
   }
   const encoded = getEncodedToken({ token: [{ mint: mintUrl, proofs: sendProofs }] })
   return { ok: true, token: encoded }
@@ -82,8 +82,8 @@ async function checkMintQuote(DB, { quote, amount, mintUrl }) {
   const proofs = await wallet.mintProofs(amount, quote)
   const db = DB._db()
   for (const p of proofs) {
-    db.prepare('INSERT OR IGNORE INTO cashu_proofs(secret,amount,C,mint_url,spent,created_at) VALUES(?,?,?,?,0,?)')
-      .run(p.secret, p.amount, p.C, mintUrl, Math.floor(Date.now()/1000))
+    db.prepare('INSERT OR IGNORE INTO cashu_proofs(secret,amount,c,keyset_id,mint_url,spent,created_at) VALUES(?,?,?,?,?,0,?)')
+      .run(p.secret, p.amount, p.C, p.id || '', mintUrl, Math.floor(Date.now()/1000))
   }
   return { ok: true, amount: proofs.reduce((s,p)=>s+p.amount,0) }
 }

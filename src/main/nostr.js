@@ -1,5 +1,6 @@
 'use strict'
 
+const keychain = require('./keychain')
 const nostrTools          = require('nostr-tools')
 const { getPublicKey, getEventHash, nip19 } = nostrTools
 const { hmac }            = require('@noble/hashes/hmac')
@@ -39,24 +40,24 @@ function signEv(event, privKey) {
   throw new Error('No signing function available in nostr-tools')
 }
 
-function createProfile(DB, { seedHex, name, about }) {
+async function createProfile(DB, { seedHex, name, about }) {
   const privKeyHex = deriveNostrKey(seedHex)
   const pubKeyHex  = getPublicKey(privKeyHex)
   const npub       = nip19.npubEncode(pubKeyHex)
 
-  // NOTE: the column is named encrypted_nsec for legacy reasons;
-  // the value stored here is the raw private key hex.
-  // Encrypting at rest is tracked in the roadmap.
+  const key           = await keychain.getOrCreateKey()
+  const encryptedNsec = keychain.encrypt(privKeyHex, key)
+
   DB._db()
     .prepare(`INSERT OR REPLACE INTO nostr_profile
       (id, pubkey, npub, encrypted_nsec, name, about, created_at)
       VALUES (1, ?, ?, ?, ?, ?, ?)`)
-    .run(pubKeyHex, npub, privKeyHex, name || 'anon', about || null, Math.floor(Date.now() / 1000))
+    .run(pubKeyHex, npub, encryptedNsec, name || 'anon', about || null, Math.floor(Date.now() / 1000))
 
   return { pubkey: pubKeyHex, npub, name, about }
 }
 
-function importNsec(DB, { nsec, name }) {
+async function importNsec(DB, { nsec, name }) {
   let privKeyHex
   try {
     const decoded = nip19.decode(nsec.trim())
@@ -64,14 +65,18 @@ function importNsec(DB, { nsec, name }) {
   } catch (_) {
     privKeyHex = nsec.trim().replace(/^0x/, '')
   }
+
   const pubKeyHex = getPublicKey(privKeyHex)
   const npub      = nip19.npubEncode(pubKeyHex)
+
+  const key           = await keychain.getOrCreateKey()
+  const encryptedNsec = keychain.encrypt(privKeyHex, key)
 
   DB._db()
     .prepare(`INSERT OR REPLACE INTO nostr_profile
       (id, pubkey, npub, encrypted_nsec, name, created_at)
       VALUES (1, ?, ?, ?, ?, ?)`)
-    .run(pubKeyHex, npub, privKeyHex, name || 'anon', Math.floor(Date.now() / 1000))
+    .run(pubKeyHex, npub, encryptedNsec, name || 'anon', Math.floor(Date.now() / 1000))
 
   return { pubkey: pubKeyHex, npub, name }
 }
@@ -87,13 +92,17 @@ function getPubkey(DB) {
   return p ? p.pubkey : null
 }
 
-function signEvent(DB, event) {
+async function signEvent(DB, event) {
   const row = DB._db()
     .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1')
     .get()
+
   if (!row) throw new Error('No Nostr profile configured')
-  const privKeyHex = row.encrypted_nsec
+
+  const key        = await keychain.getOrCreateKey()
+  const privKeyHex = keychain.decrypt(row.encrypted_nsec, key)
   const pubkey     = getPublicKey(privKeyHex)
+
   return signEv({
     kind:       event.kind       || 1,
     pubkey,

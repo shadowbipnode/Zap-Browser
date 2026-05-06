@@ -46,6 +46,7 @@
     "better-sqlite3": "^9.4.3",
     "bip39": "^3.1.0",
     "electron-store": "^8.1.0",
+    "keytar": "^7.9.0",
     "nostr-tools": "^1.17.0",
     "ws": "^8.20.0"
   },

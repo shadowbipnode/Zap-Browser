@@ -1,5 +1,1 @@
-// src/main/privacy.js
-'use strict'
-// Privacy logic is handled inline in index.js
-// This module exports helper constants
-module.exports = {}
+// privacy.js — placeholder, logic handled directly in index.js setupPrivacy()

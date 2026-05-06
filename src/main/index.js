@@ -257,6 +257,7 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
 })
 
 ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
+  if (!tabId || typeof url !== 'string') return { ok: false, error: 'Invalid arguments' }
   let u = url.trim()
   if (!u.startsWith('http://') && !u.startsWith('https://')) {
     u = u.includes('.') && !u.includes(' ')
@@ -365,15 +366,21 @@ ipcMain.handle('nostr-sign-event-nip07',  (_, { event: e }) => nostr.signEvent(D
 ipcMain.handle('nostr-get-relays-nip07',  () => nostr.getRelays())
 ipcMain.handle('nostr-nip04-encrypt', async (_, { pubkey, text }) => {
   const { nip04 } = require('nostr-tools')
+  const keychain = require('./keychain')
   const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
   if (!row) throw new Error('No Nostr profile found')
-  return nip04.encrypt(row.encrypted_nsec, pubkey, text)
+  const key        = await keychain.getOrCreateKey()
+  const privKeyHex = keychain.decrypt(row.encrypted_nsec, key)
+  return nip04.encrypt(privKeyHex, pubkey, text)
 })
 ipcMain.handle('nostr-nip04-decrypt', async (_, { pubkey, text }) => {
   const { nip04 } = require('nostr-tools')
+  const keychain = require('./keychain')
   const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
   if (!row) throw new Error('No Nostr profile found')
-  return nip04.decrypt(row.encrypted_nsec, pubkey, text)
+  const key        = await keychain.getOrCreateKey()
+  const privKeyHex = keychain.decrypt(row.encrypted_nsec, key)
+  return nip04.decrypt(privKeyHex, pubkey, text)
 })
 
 // ── IPC: NWC lightning ────────────────────────────────────────────────────────
@@ -411,7 +418,10 @@ ipcMain.handle('import-favorites-html', (_, { html }) => {
 // ── IPC: cashu ────────────────────────────────────────────────────────────────
 ipcMain.handle('cashu-get-balance', () => DB.cashuGetBalance())
 ipcMain.handle('cashu-list-mints',  () => DB.cashuListMints())
-ipcMain.handle('cashu-add-mint',    (_, { url }) => DB.cashuAddMint(url))
+ipcMain.handle('cashu-add-mint', (_, { url }) => {
+  if (!url || typeof url !== 'string' || !url.startsWith('https://')) throw new Error('Invalid mint URL')
+  return cashu.addMint(DB, { url })
+})
 ipcMain.handle('cashu-remove-mint', (_, { url }) => DB.cashuRemoveMint(url))
 
 // ── IPC: devtools ─────────────────────────────────────────────────────────────
