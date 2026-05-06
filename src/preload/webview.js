@@ -1,36 +1,34 @@
-// src/preload/webview.js — NIP-07 reale con dialogo conferma
 'use strict'
 
 const { contextBridge, ipcRenderer } = require('electron')
 
-// Blocca WebRTC IP leak — sovrascrive RTCPeerConnection
+// Prevent WebRTC from leaking the real IP address by removing ICE servers.
+// This means WebRTC still works (e.g. for video calls) but won't reveal the
+// user's IP to arbitrary third-party STUN servers.
 const OrigRTC = window.RTCPeerConnection || window.webkitRTCPeerConnection
 if (OrigRTC) {
-  const FakeRTC = function(config) {
-    // Rimuovi STUN/TURN servers per prevenire IP leak
+  const PrivateRTC = function (config) {
     if (config && config.iceServers) config.iceServers = []
     return new OrigRTC(config)
   }
-  FakeRTC.prototype = OrigRTC.prototype
-  window.RTCPeerConnection = FakeRTC
-  if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = FakeRTC
+  PrivateRTC.prototype = OrigRTC.prototype
+  window.RTCPeerConnection = PrivateRTC
+  if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = PrivateRTC
 }
 
-// Esponi funzione per aprire nuovo tab (usata da auxclick iniettato)
+// Allow pages to open links in a new tab via middle-click (handled in main)
 contextBridge.exposeInMainWorld('__zapOpenNewTab', (url) => {
   ipcRenderer.invoke('open-in-new-tab', { url })
 })
 
-// Esponi window.nostr ai siti web (NIP-07)
+// Expose window.nostr (NIP-07) so Nostr web apps can request signatures
+// without ever seeing the private key.
 contextBridge.exposeInMainWorld('nostr', {
-  getPublicKey: () => ipcRenderer.invoke('nostr-get-pubkey-nip07'),
-
-  signEvent: (event) => ipcRenderer.invoke('nostr-sign-event-nip07', { event }),
-
-  getRelays: () => ipcRenderer.invoke('nostr-get-relays-nip07'),
-
+  getPublicKey: ()             => ipcRenderer.invoke('nostr-get-pubkey-nip07'),
+  signEvent:    (event)        => ipcRenderer.invoke('nostr-sign-event-nip07', { event }),
+  getRelays:    ()             => ipcRenderer.invoke('nostr-get-relays-nip07'),
   nip04: {
     encrypt: (pubkey, text) => ipcRenderer.invoke('nostr-nip04-encrypt', { pubkey, text }),
     decrypt: (pubkey, text) => ipcRenderer.invoke('nostr-nip04-decrypt', { pubkey, text }),
-  }
+  },
 })

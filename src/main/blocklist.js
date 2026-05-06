@@ -32,6 +32,8 @@ const WHITELIST = new Set([
   'github.com','githubusercontent.com',
   'mozilla.org','apple.com','microsoft.com',
   'duckduckgo.com',
+  'youtube.com','youtu.be','ytimg.com','yt3.ggpht.com',
+  'googlevideo.com','youtube-nocookie.com',
   // Bitcoin/Nostr
   'shadowbip.com','primal.net','damus.io',
   'snort.social','stacker.news','mempool.space',

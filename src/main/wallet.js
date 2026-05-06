@@ -1,7 +1,7 @@
-// src/main/wallet.js
 'use strict'
 
-const bip39 = require('bip39')
+const bip39   = require('bip39')
+const crypto  = require('crypto')
 
 function generateMnemonic() {
   return bip39.generateMnemonic(256).split(' ')
@@ -14,22 +14,24 @@ function validateMnemonic(words) {
 
 function setupWallet(DB, { words, password, mode }) {
   const phrase = Array.isArray(words) ? words.join(' ') : words
-  let seedHex = null
 
   if (mode === 'bitcoin' && phrase.trim()) {
-    if (!bip39.validateMnemonic(phrase)) throw new Error('Mnemonic non valido')
-    const seed = bip39.mnemonicToSeedSync(phrase, password || '')
-    seedHex = seed.toString('hex')
-    const enc = seed.slice(0, 32).toString('hex') // placeholder encryption
-    const salt = require('crypto').randomBytes(16).toString('hex')
-    const db = DB._db()
-    db.prepare('INSERT OR REPLACE INTO wallet(id,encrypted_seed,salt,mode,created_at) VALUES(1,?,?,?,?)')
-      .run(enc, salt, mode, Math.floor(Date.now() / 1000))
+    if (!bip39.validateMnemonic(phrase)) throw new Error('Invalid mnemonic')
+    const seed    = bip39.mnemonicToSeedSync(phrase, password || '')
+    const seedHex = seed.toString('hex')
+    // TODO: encrypt seed at rest before storing (roadmap v0.5)
+    const salt = crypto.randomBytes(16).toString('hex')
+    DB._db()
+      .prepare('INSERT OR REPLACE INTO wallet(id,encrypted_seed,salt,mode,created_at) VALUES(1,?,?,?,?)')
+      .run(seedHex, salt, mode, Math.floor(Date.now() / 1000))
+    DB.setSetting('initialized', '1')
+    DB.setSetting('mode', mode)
+    return { success: true, seedHex }
   }
 
   DB.setSetting('initialized', '1')
   DB.setSetting('mode', mode)
-  return { success: true, seedHex }
+  return { success: true, seedHex: null }
 }
 
 module.exports = { generateMnemonic, validateMnemonic, setupWallet }

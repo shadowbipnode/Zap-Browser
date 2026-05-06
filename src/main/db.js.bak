@@ -1,13 +1,13 @@
+// src/main/db.js
 'use strict'
 
-const path      = require('path')
-const { app }   = require('electron')
-
+const path = require('path')
+const { app } = require('electron')
 let db = null
 
 function init() {
   const Database = require('better-sqlite3')
-  const dbPath   = path.join(app.getPath('userData'), 'zap.db')
+  const dbPath = path.join(app.getPath('userData'), 'zap.db')
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
@@ -17,7 +17,6 @@ function init() {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS wallet (
       id             INTEGER PRIMARY KEY,
       encrypted_seed TEXT NOT NULL,
@@ -25,7 +24,6 @@ function init() {
       mode           TEXT NOT NULL DEFAULT 'bitcoin',
       created_at     INTEGER NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS nostr_profile (
       id             INTEGER PRIMARY KEY,
       pubkey         TEXT NOT NULL,
@@ -37,28 +35,25 @@ function init() {
       nip05          TEXT,
       created_at     INTEGER NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS cashu_mints (
       url      TEXT PRIMARY KEY,
       name     TEXT,
       active   INTEGER NOT NULL DEFAULT 1,
       added_at INTEGER NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS cashu_proofs (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      mint_url   TEXT    NOT NULL,
+      mint_url   TEXT NOT NULL,
       amount     INTEGER NOT NULL,
-      secret     TEXT    NOT NULL UNIQUE,
-      c          TEXT    NOT NULL,
-      keyset_id  TEXT    NOT NULL,
+      secret     TEXT NOT NULL UNIQUE,
+      c          TEXT NOT NULL,
+      keyset_id  TEXT NOT NULL,
       spent      INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS history (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      url        TEXT    NOT NULL,
+      url        TEXT NOT NULL,
       title      TEXT,
       visited_at INTEGER NOT NULL
     );
@@ -66,22 +61,20 @@ function init() {
 
     CREATE TABLE IF NOT EXISTS favorites (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      title      TEXT    NOT NULL,
-      url        TEXT    NOT NULL,
+      title      TEXT NOT NULL,
+      url        TEXT NOT NULL,
       favicon    TEXT,
       created_at INTEGER NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS nwc_connections (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      name          TEXT    NOT NULL,
-      relay_url     TEXT    NOT NULL,
-      wallet_pubkey TEXT    NOT NULL,
-      secret        TEXT    NOT NULL,
+      name          TEXT NOT NULL,
+      relay_url     TEXT NOT NULL,
+      wallet_pubkey TEXT NOT NULL,
+      secret        TEXT NOT NULL,
       active        INTEGER NOT NULL DEFAULT 1,
       created_at    INTEGER NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS privacy_settings (
       id             INTEGER PRIMARY KEY,
       adblock        INTEGER NOT NULL DEFAULT 1,
@@ -97,7 +90,7 @@ function init() {
 
 const now = () => Math.floor(Date.now() / 1000)
 
-// ── Settings ──────────────────────────────────────────────────────────────────
+// Settings
 function getSetting(key) {
   const row = db.prepare('SELECT value FROM settings WHERE key=?').get(key)
   return row ? row.value : null
@@ -106,7 +99,7 @@ function setSetting(key, value) {
   db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, value)
 }
 
-// ── Privacy ───────────────────────────────────────────────────────────────────
+// Privacy
 function getPrivacy() {
   return db.prepare('SELECT * FROM privacy_settings WHERE id=1').get()
 }
@@ -115,14 +108,12 @@ function setPrivacy(key, value) {
   return getPrivacy()
 }
 
-// ── Favorites ─────────────────────────────────────────────────────────────────
+// Favorites
 function getFavorites() {
   return db.prepare('SELECT * FROM favorites ORDER BY created_at DESC').all()
 }
 function addFavorite({ title, url, favicon }) {
-  const r = db
-    .prepare('INSERT INTO favorites(title,url,favicon,created_at) VALUES(?,?,?,?)')
-    .run(title, url, favicon || null, now())
+  const r = db.prepare('INSERT INTO favorites(title,url,favicon,created_at) VALUES(?,?,?,?)').run(title, url, favicon || null, now())
   return { id: r.lastInsertRowid, title, url, favicon, created_at: now() }
 }
 function removeFavorite(id) {
@@ -130,15 +121,13 @@ function removeFavorite(id) {
   return { ok: true }
 }
 
-// ── Cashu ─────────────────────────────────────────────────────────────────────
+// Cashu
 function cashuGetBalance() {
-  const row = db
-    .prepare('SELECT COALESCE(SUM(amount),0) as total FROM cashu_proofs WHERE spent=0')
-    .get()
+  const row = db.prepare('SELECT COALESCE(SUM(amount),0) as total FROM cashu_proofs WHERE spent=0').get()
   return row.total
 }
 function cashuListMints() {
-  return db.prepare('SELECT url, name, active FROM cashu_mints').all()
+  return db.prepare('SELECT url,name,active FROM cashu_mints').all()
 }
 function cashuAddMint(url) {
   db.prepare('INSERT OR IGNORE INTO cashu_mints(url,active,added_at) VALUES(?,1,?)').run(url, now())
@@ -149,26 +138,52 @@ function cashuRemoveMint(url) {
   return { ok: true }
 }
 
-// ── History ───────────────────────────────────────────────────────────────────
 function addHistory(url, title) {
   if (!url || url === 'zap://newtab') return
-  db.prepare('INSERT INTO history(url,title,visited_at) VALUES(?,?,?)')
-    .run(url, title || url, now())
+  db.prepare('INSERT INTO history(url,title,visited_at) VALUES(?,?,?)').run(url, title||url, Math.floor(Date.now()/1000))
 }
+
 function getHistory(limit = 100) {
   return db.prepare('SELECT * FROM history ORDER BY visited_at DESC LIMIT ?').all(limit)
 }
+
 function clearHistory() {
   db.prepare('DELETE FROM history').run()
   return { ok: true }
 }
 
+function clearCookies() {
+  // Gestito via Electron session
+  return { ok: true }
+}
+
 module.exports = {
-  init,
-  getSetting, setSetting,
+  init, getSetting, setSetting,
   getPrivacy, setPrivacy,
   getFavorites, addFavorite, removeFavorite,
-  addHistory, getHistory, clearHistory,
+  addHistory, getHistory, clearHistory, clearCookies,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   _db: () => db,
 }
+
+// Import preferiti da HTML (formato NETSCAPE-Bookmark-File)
+function importFavoritesFromHTML(DB, html) {
+  const results = []
+  // Regex per estrarre link dai bookmark HTML
+  const linkRe = /<A\s+[^>]*HREF="([^"]+)"[^>]*>([^<]+)<\/A>/gi
+  let match
+  while ((match = linkRe.exec(html)) !== null) {
+    const url   = match[1].trim()
+    const title = match[2].trim()
+    if (url.startsWith('http') && title) {
+      try {
+        DB._db().prepare(`INSERT OR IGNORE INTO favorites (url, title, favicon, created_at)
+          VALUES (?, ?, NULL, ?)`).run(url, title, Math.floor(Date.now()/1000))
+        results.push({ url, title })
+      } catch(_) {}
+    }
+  }
+  return results
+}
+
+module.exports.importFavoritesFromHTML = importFavoritesFromHTML
