@@ -48,6 +48,7 @@
     "electron-store": "^8.1.0",
     "keytar": "^7.9.0",
     "nostr-tools": "^1.17.0",
+    "qrcode.react": "^4.2.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {

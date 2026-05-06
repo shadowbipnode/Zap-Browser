@@ -151,10 +151,16 @@ function LBTCTab() {
 function CashuTab() {
   const [mints,setMints]=useState<Mint[]>([])
   const [bal,setBal]=useState(0)
-  const [action,setAction]=useState<'mints'|null>(null)
+  const [action,setAction]=useState<'mints'|'deposit'|'receive'|null>(null)
   const [newMint,setNewMint]=useState('')
   const [loading,setLoading]=useState(false)
   const [msg,setMsg]=useState('')
+  const [msgK,setMsgK]=useState('ok')
+  const [depositAmount,setDepositAmount]=useState('')
+  const [depositInvoice,setDepositInvoice]=useState('')
+  const [depositQuote,setDepositQuote]=useState('')
+  const [depositMint,setDepositMint]=useState('')
+  const [receiveToken,setReceiveToken]=useState('')
 
   useEffect(()=>{ zap()?.cashuListMints().then(setMints); zap()?.cashuGetBalance().then(setBal) },[])
   const reload=()=>{ zap()?.cashuListMints().then(setMints); zap()?.cashuGetBalance().then(setBal) }
@@ -163,6 +169,38 @@ function CashuTab() {
     setLoading(true)
     try{ await zap()?.cashuAddMint({url:newMint}); setNewMint(''); reload() }
     catch(e:any){setMsg(String(e))}
+    setLoading(false)
+  }
+
+  const show=(m:string,k='ok')=>{setMsg(m);setMsgK(k);setTimeout(()=>setMsg(''),4000)}
+
+  const startDeposit=async()=>{
+    if (!depositAmount || !depositMint) return
+    setLoading(true)
+    try{
+      const r = await (window as any).zap?.cashuMintTokens({amount:parseInt(depositAmount), mintUrl:depositMint})
+      setDepositInvoice(r.invoice)
+      setDepositQuote(r.quote)
+    } catch(e:any){show(String(e),'err')}
+    setLoading(false)
+  }
+
+  const checkDeposit=async()=>{
+    setLoading(true)
+    try{
+      const r = await (window as any).zap?.cashuCheckMintQuote({quote:depositQuote, amount:parseInt(depositAmount), mintUrl:depositMint})
+      if (r?.ok){ show('Ricevuto! '+r.amount+' sats'); reload(); setAction(null) }
+      else show('Invoice non ancora pagata — riprova','err')
+    } catch(e:any){show(String(e),'err')}
+    setLoading(false)
+  }
+
+  const doReceive=async()=>{
+    setLoading(true)
+    try{
+      const r = await (window as any).zap?.cashuReceive({token:receiveToken})
+      show('Ricevuto '+r.amount+' sats!'); reload(); setReceiveToken(''); setAction(null)
+    } catch(e:any){show(String(e),'err')}
     setLoading(false)
   }
 
@@ -175,8 +213,45 @@ function CashuTab() {
       </div>
       <p style={{fontSize:11,color:'var(--t2)',textAlign:'center',marginBottom:12}}>🥜 Ecash Chaumiano — privato e non tracciabile</p>
       <div className="act-row">
-        <button className="act-btn" onClick={()=>setAction('mints')}>🏦 Gestisci Mint</button>
+        <button className="act-btn" onClick={()=>setAction('deposit')}>⚡ Mint da Lightning</button>
+        <button className="act-btn" onClick={()=>setAction('receive')}>📥 Ricevi Token</button>
+        <button className="act-btn" onClick={()=>setAction('mints')}>🏦 Mint</button>
       </div>
+      {action==='deposit'&&<>
+        <div className="field"><label>Mint</label>
+          <select className="inp" value={depositMint} onChange={e=>setDepositMint(e.target.value)}>
+            <option value="">Seleziona mint...</option>
+            {mints.map(m=><option key={m.url} value={m.url}>{m.url.replace('https://','')}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>Importo (sats)</label>
+          <input className="inp" type="number" min="1" placeholder="10" value={depositAmount} onChange={e=>setDepositAmount(e.target.value)}/>
+        </div>
+        {!depositInvoice && <div className="act-row">
+          <button className="act-btn primary" disabled={loading||!depositAmount||!depositMint} onClick={startDeposit}>{loading?'...':'Genera Invoice'}</button>
+          <button className="act-btn" onClick={()=>setAction(null)}>Annulla</button>
+        </div>}
+        {depositInvoice && <>
+          <div className="field"><label>📋 Copia questa invoice e pagala dal tuo wallet Lightning</label>
+            <textarea className="inp inp-mono" rows={3} readOnly value={depositInvoice}
+              onClick={e=>(e.target as any).select()}/>
+          </div>
+          <div className="act-row">
+            <button className="act-btn primary" disabled={loading} onClick={checkDeposit}>{loading?'...':'✓ Ho pagato'}</button>
+            <button className="act-btn" onClick={()=>{setAction(null);setDepositInvoice('');setDepositQuote('')}}>Annulla</button>
+          </div>
+        </>}
+      </>}
+      {action==='receive'&&<>
+        <div className="field"><label>Token Cashu (cashuA...)</label>
+          <textarea className="inp inp-mono" rows={3} placeholder="cashuA..." value={receiveToken}
+            onChange={e=>setReceiveToken(e.target.value)}/>
+        </div>
+        <div className="act-row">
+          <button className="act-btn primary" disabled={loading||!receiveToken} onClick={doReceive}>{loading?'...':'Ricevi'}</button>
+          <button className="act-btn" onClick={()=>setAction(null)}>Annulla</button>
+        </div>
+      </>}
       {action==='mints'&&<>
         {mints.map(m=>(
           <div key={m.url} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'1px solid var(--b0)'}}>
@@ -192,7 +267,7 @@ function CashuTab() {
           <button className="act-btn primary" disabled={loading||!newMint} onClick={addMint}>Aggiungi</button>
           <button className="act-btn" onClick={()=>setAction(null)}>Chiudi</button>
         </div>
-        {msg&&<div className="msg err">{msg}</div>}
+        {msg&&<div className={`msg ${msgK}`}>{msg}</div>}
       </>}
     </div>
   )

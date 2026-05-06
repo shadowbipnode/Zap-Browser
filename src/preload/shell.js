@@ -68,7 +68,10 @@ contextBridge.exposeInMainWorld('zap', {
   cashuGetBalance: () => ipcRenderer.invoke('cashu-get-balance'),
   cashuListMints:  () => ipcRenderer.invoke('cashu-list-mints'),
   cashuAddMint:    (a) => ipcRenderer.invoke('cashu-add-mint', a),
-  cashuRemoveMint: (a) => ipcRenderer.invoke('cashu-remove-mint', a),
+  cashuRemoveMint:     (a) => ipcRenderer.invoke('cashu-remove-mint', a),
+  cashuMintTokens:     (a) => ipcRenderer.invoke('cashu-mint-tokens', a),
+  cashuCheckMintQuote: (a) => ipcRenderer.invoke('cashu-check-mint-quote', a),
+  cashuReceive:        (a) => ipcRenderer.invoke('cashu-receive', a),
 
   // Data management
   resetBrowser: () => ipcRenderer.invoke('reset-browser'),

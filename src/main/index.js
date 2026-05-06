@@ -422,7 +422,10 @@ ipcMain.handle('cashu-add-mint', (_, { url }) => {
   if (!url || typeof url !== 'string' || !url.startsWith('https://')) throw new Error('Invalid mint URL')
   return cashu.addMint(DB, { url })
 })
-ipcMain.handle('cashu-remove-mint', (_, { url }) => DB.cashuRemoveMint(url))
+ipcMain.handle('cashu-remove-mint',      (_, { url }) => DB.cashuRemoveMint(url))
+ipcMain.handle('cashu-mint-tokens',      (_, args) => cashu.mintTokens(DB, args))
+ipcMain.handle('cashu-check-mint-quote', (_, args) => cashu.checkMintQuote(DB, args))
+ipcMain.handle('cashu-receive',          (_, args) => cashu.receive(DB, args))
 
 // ── IPC: devtools ─────────────────────────────────────────────────────────────
 ipcMain.handle('open-devtools', () => {
