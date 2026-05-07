@@ -53,7 +53,7 @@ The Nostr private key and BIP39 seed are **encrypted at rest** using AES-256-GCM
 
 ### Lightning (NWC)
 
-Connect any LND or CLN node via a `nostr+walletconnect://` connection string. Compatible with Alby, Zeus, Mutiny, Breez, Phoenix, LNbits. Communication runs over a real WebSocket to the configured Nostr relay with NIP-47 ECDH encryption. Pay invoices, create invoices, check balance, disconnect — all from inside the browser.
+Connect any LND or CLN node via a `nostr+walletconnect://` connection string. Compatible with Alby, Zeus, LNbits, Blink, Coinos. Communication runs over a real WebSocket to the configured Nostr relay with NIP-47 ECDH encryption. Pay invoices, create invoices, check balance, disconnect — all from inside the browser.
 
 ### Cashu Ecash
 
