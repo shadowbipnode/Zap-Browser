@@ -40,12 +40,15 @@ contextBridge.exposeInMainWorld('zap', {
   validateMnemonic: (a) => ipcRenderer.invoke('validate-mnemonic', a),
   setupWallet:      (a) => ipcRenderer.invoke('setup-wallet', a),
 
-  // Nostr
+ // Nostr
   nostrCreateProfile: (a) => ipcRenderer.invoke('nostr-create-profile', a),
   nostrImportNsec:    (a) => ipcRenderer.invoke('nostr-import-nsec', a),
   nostrSkip:          () => ipcRenderer.invoke('nostr-skip'),
   nostrGetProfile:    () => ipcRenderer.invoke('nostr-get-profile'),
   nostrRemoveProfile: () => ipcRenderer.invoke('nostr-remove-profile'),
+  nostrListPermissions: () => ipcRenderer.invoke('nostr-list-permissions'),
+  nostrRemovePermission: (a) =>
+    ipcRenderer.invoke('nostr-remove-permission', a),
   nostrGetRelays:     () => ipcRenderer.invoke('nostr-get-relays'),
   nostrSignEvent:     (a) => ipcRenderer.invoke('nostr-sign-event', a),
   nostrGetPubkey:     () => ipcRenderer.invoke('nostr-get-pubkey'),

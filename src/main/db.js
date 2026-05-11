@@ -82,6 +82,17 @@ function init() {
       active           INTEGER NOT NULL DEFAULT 1,
       created_at       INTEGER NOT NULL
     );
+    
+    CREATE TABLE IF NOT EXISTS nostr_permissions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      origin     TEXT    NOT NULL,
+      action     TEXT    NOT NULL,
+      decision   TEXT    NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(origin, action)
+    );
+
 
     CREATE TABLE IF NOT EXISTS privacy_settings (
       id             INTEGER PRIMARY KEY,
@@ -176,6 +187,40 @@ function clearHistory() {
   return { ok: true }
 }
 
+// ── Nostr permissions ─────────────────────────────────────────────────────────
+function getNostrPermission(origin, action) {
+  return db
+    .prepare('SELECT decision FROM nostr_permissions WHERE origin=? AND action=?')
+    .get(origin, action) || null
+}
+
+function setNostrPermission(origin, action, decision) {
+  const ts = now()
+
+  db.prepare(`
+    INSERT INTO nostr_permissions(origin, action, decision, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(origin, action)
+    DO UPDATE SET decision=excluded.decision, updated_at=excluded.updated_at
+  `).run(origin, action, decision, ts, ts)
+
+  return { origin, action, decision }
+}
+
+function listNostrPermissions() {
+  return db
+    .prepare('SELECT origin, action, decision, updated_at FROM nostr_permissions ORDER BY updated_at DESC')
+    .all()
+}
+
+function removeNostrPermission(origin, action) {
+  db
+    .prepare('DELETE FROM nostr_permissions WHERE origin=? AND action=?')
+    .run(origin, action)
+
+  return { ok: true }
+}
+
 module.exports = {
   init,
   getSetting, setSetting,
@@ -183,5 +228,6 @@ module.exports = {
   getFavorites, addFavorite, removeFavorite,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
+  getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission,
   _db: () => db,
 }

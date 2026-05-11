@@ -1,5 +1,5 @@
 'use strict'
-const { app, BrowserWindow, BrowserView, ipcMain, session } = require('electron')
+const { app, BrowserWindow, BrowserView, ipcMain, session, dialog } = require('electron')
 const path   = require('path')
 const DB     = require('./db')
 const wallet = require('./wallet')
@@ -28,6 +28,80 @@ const UA_POOL = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
 ]
 let currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
+const nostrPermissions = new Map()
+
+function getIpcOrigin(ipcEvent) {
+  const url =
+    ipcEvent.senderFrame?.url ||
+    ipcEvent.sender?.getURL?.() ||
+    ''
+
+  try {
+    return new URL(url).origin
+  } catch (_) {
+    return 'unknown-origin'
+  }
+}
+
+function summarizeNostrEvent(event) {
+  if (!event || typeof event !== 'object') {
+    return 'Unknown event'
+  }
+
+  const kind = event.kind ?? 'unknown'
+  const content = typeof event.content === 'string' ? event.content : ''
+  const tags = Array.isArray(event.tags) ? event.tags.length : 0
+
+  return [
+    `Kind: ${kind}`,
+    `Content length: ${content.length} chars`,
+    `Tags: ${tags}`,
+  ].join('\n')
+}
+
+async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
+  const origin = getIpcOrigin(ipcEvent)
+
+  const stored = DB.getNostrPermission(origin, action)
+
+  if (stored?.decision === 'allow') {
+    return true
+  }
+
+  if (stored?.decision === 'deny') {
+    return false
+  }
+
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Nostr signing request',
+    message: 'A website is requesting access to your Nostr identity.',
+    detail: [
+      `Origin: ${origin}`,
+      `Action: ${action}`,
+      '',
+      summarizeNostrEvent(nostrEvent),
+      '',
+      'Only approve this request if you trust this website.',
+    ].join('\n'),
+    buttons: ['Allow once', 'Always allow', 'Always deny', 'Deny once'],
+    defaultId: 0,
+    cancelId: 3,
+    noLink: true,
+  })
+
+  if (result.response === 1) {
+    DB.setNostrPermission(origin, action, 'allow')
+    return true
+  }
+
+  if (result.response === 2) {
+    DB.setNostrPermission(origin, action, 'deny')
+    return false
+  }
+
+  return result.response === 0
+}
 
 function createMainView() {
   const view = new BrowserView({
@@ -358,12 +432,25 @@ ipcMain.handle('nostr-import-nsec',    (_, args) => nostr.importNsec(DB, args))
 ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1'))
 ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
 ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
+ipcMain.handle('nostr-list-permissions', () => DB.listNostrPermissions())
+ipcMain.handle('nostr-remove-permission', (_, { origin, action }) => {
+  if (!origin || !action) throw new Error('Invalid permission')
+  return DB.removeNostrPermission(origin, action)
+})
 ipcMain.handle('nostr-get-relays',     () => nostr.getRelays())
 ipcMain.handle('nostr-sign-event',     (_, { event }) => nostr.signEvent(DB, event))
 ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB))
 // NIP-07 aliases — same implementation, separate IPC channels for clarity
 ipcMain.handle('nostr-get-pubkey-nip07',  () => nostr.getPubkey(DB))
-ipcMain.handle('nostr-sign-event-nip07',  (_, { event: e }) => nostr.signEvent(DB, e))
+ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
+  const allowed = await confirmNostrPermission(ipcEvent, 'signEvent', e)
+
+  if (!allowed) {
+    throw new Error('Nostr signing request denied by user')
+  }
+
+  return nostr.signEvent(DB, e)
+})
 ipcMain.handle('nostr-get-relays-nip07',  () => nostr.getRelays())
 ipcMain.handle('nostr-nip04-encrypt', async (_, { pubkey, text }) => {
   const { nip04 } = require('nostr-tools')

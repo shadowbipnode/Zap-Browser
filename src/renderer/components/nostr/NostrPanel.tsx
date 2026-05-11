@@ -10,6 +10,7 @@ interface Profile {
 export default function NostrPanel({ onClose }: { onClose:()=>void }) {
   const [profile, setProfile] = useState<Profile|null>(null)
   const [relays,  setRelays]  = useState<string[]>([])
+  const [permissions, setPermissions] = useState<any[]>([])
   const [showImport, setShowImport] = useState(false)
   const [nsec, setNsec] = useState('')
   const [name, setName] = useState('')
@@ -21,6 +22,8 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
     setProfile(p || null)
     const r = await window.zap?.nostrGetRelays()
     setRelays(Object.keys(r || {}))
+    const perms = await window.zap?.nostrListPermissions()
+    setPermissions(perms || [])
   }
 
   useEffect(() => {
@@ -71,6 +74,20 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
       setShowImport(true)
     } catch (err: any) {
       setError(err?.message || 'Failed to disconnect profile.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revokePermission = async (origin: string, action: string) => {
+    setBusy(true)
+    setError('')
+
+    try {
+      await window.zap?.nostrRemovePermission({ origin, action })
+      await load()
+    } catch (err: any) {
+      setError(err?.message || 'Failed to revoke permission.')
     } finally {
       setBusy(false)
     }
@@ -177,7 +194,75 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
             >
               📋 Copia pubkey
             </button>
+            <div style={{
+              marginTop:16,
+              padding:12,
+              background:'var(--bg-3)',
+              border:'1px solid var(--b0)',
+              borderRadius:'var(--r-md)',
+            }}>
+              <div className="sec-title" style={{ marginBottom:10 }}>
+                NIP-07 Permissions
+              </div>
 
+              {permissions.length === 0 ? (
+                <div style={{
+                  fontSize:11.5,
+                  color:'var(--t2)',
+                  lineHeight:1.5,
+                }}>
+                  No stored permissions yet.
+                </div>
+              ) : (
+                permissions.map((perm, idx) => (
+                  <div
+                    key={`${perm.origin}-${perm.action}-${idx}`}
+                    style={{
+                      padding:'10px 0',
+                      borderBottom:
+                        idx !== permissions.length - 1
+                          ? '1px solid var(--b0)'
+                          : 'none',
+                    }}
+                  >
+                    <div style={{
+                      fontSize:12,
+                      fontWeight:700,
+                      color:'var(--t0)',
+                      marginBottom:3,
+                      wordBreak:'break-all',
+                    }}>
+                      {perm.origin}
+                    </div>
+
+                    <div style={{
+                      fontSize:11,
+                      color:'var(--t2)',
+                      marginBottom:8,
+                    }}>
+                      {perm.action} — {perm.decision}
+                    </div>
+
+                    <button
+                      style={{
+                        padding:'6px 10px',
+                        border:'1px solid #7f1d1d',
+                        background:'rgba(127,29,29,.15)',
+                        color:'#fca5a5',
+                        borderRadius:'var(--r-sm)',
+                        cursor:'pointer',
+                        fontSize:11,
+                      }}
+                      onClick={() =>
+                        revokePermission(perm.origin, perm.action)
+                      }
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
             <button
               style={{
                 width:'100%',
