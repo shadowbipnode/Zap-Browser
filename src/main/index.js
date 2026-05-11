@@ -58,7 +58,29 @@ function summarizeNostrEvent(event) {
     `Tags: ${tags}`,
   ].join('\n')
 }
+function summarizeNostrRequest(action, payload) {
+  if (action === 'getPublicKey') {
+    return 'The site wants to read your public Nostr identity.'
+  }
 
+  if (action === 'nip04.encrypt') {
+    return [
+      'The site wants to encrypt a NIP-04 message.',
+      `Target pubkey: ${payload?.pubkey || 'unknown'}`,
+      `Text length: ${payload?.text?.length || 0} chars`,
+    ].join('\n')
+  }
+
+  if (action === 'nip04.decrypt') {
+    return [
+      'The site wants to decrypt a NIP-04 message.',
+      `Sender/target pubkey: ${payload?.pubkey || 'unknown'}`,
+      `Ciphertext length: ${payload?.text?.length || 0} chars`,
+    ].join('\n')
+  }
+
+  return summarizeNostrEvent(payload)
+}
 async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
   const origin = getIpcOrigin(ipcEvent)
 
@@ -80,7 +102,7 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
       `Origin: ${origin}`,
       `Action: ${action}`,
       '',
-      summarizeNostrEvent(nostrEvent),
+      summarizeNostrRequest(action, nostrEvent),
       '',
       'Only approve this request if you trust this website.',
     ].join('\n'),
@@ -441,7 +463,15 @@ ipcMain.handle('nostr-get-relays',     () => nostr.getRelays())
 ipcMain.handle('nostr-sign-event',     (_, { event }) => nostr.signEvent(DB, event))
 ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB))
 // NIP-07 aliases — same implementation, separate IPC channels for clarity
-ipcMain.handle('nostr-get-pubkey-nip07',  () => nostr.getPubkey(DB))
+ipcMain.handle('nostr-get-pubkey-nip07', async (ipcEvent) => {
+  const allowed = await confirmNostrPermission(ipcEvent, 'getPublicKey', null)
+
+  if (!allowed) {
+    throw new Error('Nostr public key request denied by user')
+  }
+
+  return nostr.getPubkey(DB)
+})
 ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
   const allowed = await confirmNostrPermission(ipcEvent, 'signEvent', e)
 
@@ -452,22 +482,46 @@ ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
   return nostr.signEvent(DB, e)
 })
 ipcMain.handle('nostr-get-relays-nip07',  () => nostr.getRelays())
-ipcMain.handle('nostr-nip04-encrypt', async (_, { pubkey, text }) => {
+ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
+  const allowed = await confirmNostrPermission(ipcEvent, 'nip04.encrypt', {
+    pubkey,
+    text,
+  })
+
+  if (!allowed) {
+    throw new Error('Nostr NIP-04 encrypt request denied by user')
+  }
+
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
   const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
+
   if (!row) throw new Error('No Nostr profile found')
+
   const key        = await keychain.getOrCreateKey()
   const privKeyHex = keychain.decrypt(row.encrypted_nsec, key)
+
   return nip04.encrypt(privKeyHex, pubkey, text)
 })
-ipcMain.handle('nostr-nip04-decrypt', async (_, { pubkey, text }) => {
+ipcMain.handle('nostr-nip04-decrypt', async (ipcEvent, { pubkey, text }) => {
+  const allowed = await confirmNostrPermission(ipcEvent, 'nip04.decrypt', {
+    pubkey,
+    text,
+  })
+
+  if (!allowed) {
+    throw new Error('Nostr NIP-04 decrypt request denied by user')
+  }
+
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
   const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
+
   if (!row) throw new Error('No Nostr profile found')
+
   const key        = await keychain.getOrCreateKey()
   const privKeyHex = keychain.decrypt(row.encrypted_nsec, key)
+
   return nip04.decrypt(privKeyHex, pubkey, text)
 })
 
