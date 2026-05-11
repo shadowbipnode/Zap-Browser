@@ -34,8 +34,6 @@ function NWCTab() {
   const [nwcUri,setNwcUri]=useState('')
   const [name,setName]=useState('')
   const [invoice,setInvoice]=useState('')
-  const [sendAmount,setSendAmount]=useState('')
-  const [sendComment,setSendComment]=useState('')
   const [amount,setAmount]=useState('')
   const [desc,setDesc]=useState('')
   const [genInv,setGenInv]=useState('')
@@ -57,42 +55,10 @@ function NWCTab() {
     catch(e:any){show(String(e),'err')}
     setLoading(false)
   }
-  const isLightningAddress=(v:string)=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim())
-
   const pay=async()=>{
-    const target=invoice.trim()
     setLoading(true);setMsg('')
-
-    try{
-      if(isLightningAddress(target)){
-        const sats=parseInt(sendAmount)
-        if(!Number.isFinite(sats)||sats<=0) throw new Error('Inserisci un importo valido in sats')
-
-        const params=await zap()?.lnurlFetchPayParams({address:target})
-        const amountMsat=sats*1000
-
-        if(amountMsat<params.minSendable||amountMsat>params.maxSendable){
-          throw new Error(`Importo fuori range. Min ${Math.ceil(params.minSendable/1000)} sats, max ${Math.floor(params.maxSendable/1000)} sats`)
-        }
-
-        const inv=await zap()?.lnurlRequestInvoice({
-          callback:params.callback,
-          amountMsat,
-          comment:sendComment.trim()||undefined
-        })
-
-        await zap()?.nwcPayInvoice({invoice:inv.invoice})
-      }else{
-        await zap()?.nwcPayInvoice({invoice:target})
-      }
-
-      show('Pagato! ⚡')
-      setInvoice('')
-      setSendAmount('')
-      setSendComment('')
-      setAction(null)
-    }
-    catch(e:any){show(String(e?.message||e),'err')}
+    try{ await zap()?.nwcPayInvoice({invoice}); show('Pagato! ⚡'); setInvoice(''); setAction(null) }
+    catch(e:any){show(String(e),'err')}
     setLoading(false)
   }
   const mkInv=async()=>{
@@ -146,19 +112,11 @@ function NWCTab() {
         <button className="act-btn" onClick={()=>setAction('receive')}>↓ Invoice</button>
       </div>
       {action==='send'&&<>
-        <div className="field"><label>Invoice Lightning o Lightning Address</label>
-          <textarea className="inp inp-mono" rows={3} placeholder="lnbc... oppure name@domain.com" value={invoice} onChange={e=>setInvoice(e.target.value)}/></div>
-
-        {isLightningAddress(invoice)&&<>
-          <div className="field"><label>Importo (sats)</label>
-            <input className="inp" type="number" min="1" placeholder="21" value={sendAmount} onChange={e=>setSendAmount(e.target.value)}/></div>
-          <div className="field"><label>Commento opzionale</label>
-            <input className="inp" placeholder="Zap from Zap Browser" value={sendComment} onChange={e=>setSendComment(e.target.value)}/></div>
-        </>}
-
+        <div className="field"><label>Invoice Lightning</label>
+          <textarea className="inp inp-mono" rows={4} placeholder="lnbc..." value={invoice} onChange={e=>setInvoice(e.target.value)}/></div>
         {msg&&<div className={`msg ${msgK}`}>{msg}</div>}
         <div className="act-row">
-          <button className="act-btn primary" disabled={loading||!invoice||isLightningAddress(invoice)&&!sendAmount} onClick={pay}>{loading?'Pagando...':'Paga ⚡'}</button>
+          <button className="act-btn primary" disabled={loading||!invoice} onClick={pay}>{loading?'Pagando...':'Paga ⚡'}</button>
           <button className="act-btn" onClick={()=>setAction(null)}>Annulla</button>
         </div>
       </>}

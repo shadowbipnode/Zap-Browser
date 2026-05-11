@@ -47,19 +47,43 @@ function openWs(relayUrl, walletPubkey, secretHex) {
       try {
         const msg = JSON.parse(data.toString())
         if (msg[0] !== 'EVENT') return
+
         const event = msg[2]
-        if (event.kind !== 23195) return
+        if (!event || event.kind !== 23195) return
+
         const decrypted = await nip04.decrypt(secretHex, walletPubkey, event.content)
         const response  = JSON.parse(decrypted)
-        // Resolve the oldest pending call
-        for (const [key, p] of pendingCalls.entries()) {
-          clearTimeout(p.timer)
-          if (response.error) p.reject(new Error(response.error.message || 'NWC error'))
-          else p.resolve(response.result)
-          pendingCalls.delete(key)
-          break
+
+        const requestTag = Array.isArray(event.tags)
+          ? event.tags.find(t => Array.isArray(t) && t[0] === 'e')
+          : null
+
+        const requestId = requestTag?.[1]
+
+        let pending = requestId ? pendingCalls.get(requestId) : null
+        let pendingKey = requestId
+
+        // Legacy fallback for wallet services that do not return an e tag.
+        // This keeps compatibility but still prefers proper NIP-47 correlation.
+        if (!pending) {
+          const first = pendingCalls.entries().next()
+          if (first.done) return
+          pendingKey = first.value[0]
+          pending = first.value[1]
         }
-      } catch (_) {}
+
+        clearTimeout(pending.timer)
+
+        if (response.error) {
+          pending.reject(new Error(response.error.message || 'NWC error'))
+        } else {
+          pending.resolve(response.result)
+        }
+
+        pendingCalls.delete(pendingKey)
+      } catch (err) {
+        console.error('[NWC] Failed to process response:', err.message)
+      }
     })
 
     ws.on('error', (err) => { clearTimeout(timeout); reject(err) })
@@ -89,12 +113,21 @@ async function nwcRequest(method, params = {}) {
   event.sig    = getSignature(event, secret)
 
   return new Promise((resolve, reject) => {
-    const key   = method + '_' + Date.now()
+    const requestId = event.id
+
     const timer = setTimeout(() => {
-      pendingCalls.delete(key)
+      pendingCalls.delete(requestId)
       reject(new Error(`NWC request timed out: ${method}`))
     }, 30000)
-    pendingCalls.set(key, { resolve, reject, timer })
+
+    pendingCalls.set(requestId, {
+      method,
+      resolve,
+      reject,
+      timer,
+      createdAt: Date.now(),
+    })
+
     activeWs.send(JSON.stringify(['EVENT', event]))
   })
 }

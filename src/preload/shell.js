@@ -53,6 +53,11 @@ contextBridge.exposeInMainWorld('zap', {
   nostrSignEvent:     (a) => ipcRenderer.invoke('nostr-sign-event', a),
   nostrGetPubkey:     () => ipcRenderer.invoke('nostr-get-pubkey'),
 
+  // LNURL / Lightning Address
+  lnurlIsLightningAddress: (a) => ipcRenderer.invoke('lnurl-is-lightning-address', a),
+  lnurlFetchPayParams:    (a) => ipcRenderer.invoke('lnurl-fetch-pay-params', a),
+  lnurlRequestInvoice:    (a) => ipcRenderer.invoke('lnurl-request-invoice', a),
+
   // NWC Lightning
   nwcConnect:     (a) => ipcRenderer.invoke('nwc-connect', a),
   nwcDisconnect:  () => ipcRenderer.invoke('nwc-disconnect'),

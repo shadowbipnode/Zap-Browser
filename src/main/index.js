@@ -9,6 +9,7 @@ const bl     = require('./blocklist')
 const doh    = require('./doh')
 const v4v    = require('./value4value')
 const cashu  = require('./cashu')
+const lnurl  = require('./lnurl')
 
 const isDev = !app.isPackaged
 
@@ -524,7 +525,18 @@ ipcMain.handle('nostr-nip04-decrypt', async (ipcEvent, { pubkey, text }) => {
 
   return nip04.decrypt(privKeyHex, pubkey, text)
 })
+// ── IPC: LNURL / Lightning Address ────────────────────────────────────────────
+ipcMain.handle('lnurl-is-lightning-address', (_, { value }) => {
+  return lnurl.isLightningAddress(value)
+})
 
+ipcMain.handle('lnurl-fetch-pay-params', (_, { address }) => {
+  return lnurl.fetchPayParams(address)
+})
+
+ipcMain.handle('lnurl-request-invoice', (_, args) => {
+  return lnurl.requestInvoice(args)
+})
 // ── IPC: NWC lightning ────────────────────────────────────────────────────────
 ipcMain.handle('nwc-connect',     (_, args)      => nwc.connect(DB, args))
 ipcMain.handle('nwc-disconnect',  ()              => nwc.disconnect(DB))
