@@ -32,6 +32,8 @@ export default function BrowserPage() {
   const [paying, setPaying]       = useState(false)
   const [suggestions, setSuggestions] = useState<any[]>([])
   const [showSuggest, setShowSuggest] = useState(false)
+  const [sitePermOpen, setSitePermOpen] = useState(false)
+  const [sitePermissions, setSitePermissions] = useState<any[]>([])
 
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
   const isNew = !activeTab?.url || activeTab.url === 'zap://newtab' || activeTab.url === '' || activeTab.url === ''
@@ -91,6 +93,31 @@ export default function BrowserPage() {
   useEffect(() => {
     window.zap?.shellResize({ panelOpen: panel !== null })
   }, [panel])
+
+
+  const getActiveOrigin = () => {
+    try {
+      const u = activeTab?.url || ''
+      if (!u.startsWith('http://') && !u.startsWith('https://')) return null
+      return new URL(u).origin
+    } catch (_) {
+      return null
+    }
+  }
+
+  const openSitePermissions = async () => {
+    const origin = getActiveOrigin()
+    const perms = await window.zap?.nostrListPermissions()
+    setSitePermissions((perms || []).filter((p: any) => p.origin === origin))
+    setSitePermOpen(false)
+    setPanel('nostr')
+  }
+
+  const revokeSitePermission = async (origin: string, action: string) => {
+    await window.zap?.nostrRemovePermission({ origin, action })
+    const perms = await window.zap?.nostrListPermissions()
+    setSitePermissions((perms || []).filter((p: any) => p.origin === origin))
+  }
 
   const togglePanel = (p: Panel) => setPanel(prev => prev === p ? null : p)
 
@@ -267,7 +294,21 @@ export default function BrowserPage() {
           style={{ background:'none', border:'none', cursor:'pointer', color:'var(--t2)', fontSize:14, padding:'0 4px', flexShrink:0 }}
         >🏠</button>
         <div className="addr-wrap" style={{ cursor:'text' }}>
-          <span className="addr-icon">{secIcon()}</span>
+          <button
+            title="Site permissions"
+            onClick={openSitePermissions}
+            style={{
+              background:'none',
+              border:'none',
+              cursor:'pointer',
+              color:'var(--t2)',
+              fontSize:14,
+              padding:0,
+              marginRight:4,
+            }}
+          >
+            {secIcon()}
+          </button>
           <input className="addr-input"
             value={addrVal}
             onChange={e => handleAddrInput(e.target.value)}
@@ -278,6 +319,8 @@ export default function BrowserPage() {
             autoFocus
           />
         </div>
+
+        {/* Site permissions are shown inside the Nostr side panel */}
 
         {/* 3 privacy buttons */}
         <div className="priv-row">
