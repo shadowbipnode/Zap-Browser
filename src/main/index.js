@@ -357,6 +357,7 @@ ipcMain.handle('nostr-create-profile', (_, args) => nostr.createProfile(DB, args
 ipcMain.handle('nostr-import-nsec',    (_, args) => nostr.importNsec(DB, args))
 ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1'))
 ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
+ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
 ipcMain.handle('nostr-get-relays',     () => nostr.getRelays())
 ipcMain.handle('nostr-sign-event',     (_, { event }) => nostr.signEvent(DB, event))
 ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB))

@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('zap', {
   nostrImportNsec:    (a) => ipcRenderer.invoke('nostr-import-nsec', a),
   nostrSkip:          () => ipcRenderer.invoke('nostr-skip'),
   nostrGetProfile:    () => ipcRenderer.invoke('nostr-get-profile'),
+  nostrRemoveProfile: () => ipcRenderer.invoke('nostr-remove-profile'),
   nostrGetRelays:     () => ipcRenderer.invoke('nostr-get-relays'),
   nostrSignEvent:     (a) => ipcRenderer.invoke('nostr-sign-event', a),
   nostrGetPubkey:     () => ipcRenderer.invoke('nostr-get-pubkey'),

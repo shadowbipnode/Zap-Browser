@@ -122,5 +122,22 @@ function getRelays() {
     'wss://nostr.wine':          { read: true,  write: false },
   }
 }
+function removeProfile(DB) {
+  DB._db()
+    .prepare('DELETE FROM nostr_profile WHERE id=1')
+    .run()
 
-module.exports = { createProfile, importNsec, getProfile, getPubkey, signEvent, getRelays }
+  DB.setSetting('nostr_skipped', '0')
+
+  return { ok: true }
+}
+
+module.exports = {
+  createProfile,
+  importNsec,
+  getProfile,
+  getPubkey,
+  signEvent,
+  getRelays,
+  removeProfile,
+}

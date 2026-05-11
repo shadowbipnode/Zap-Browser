@@ -73,13 +73,14 @@ function init() {
     );
 
     CREATE TABLE IF NOT EXISTS nwc_connections (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      name          TEXT    NOT NULL,
-      relay_url     TEXT    NOT NULL,
-      wallet_pubkey TEXT    NOT NULL,
-      secret        TEXT    NOT NULL,
-      active        INTEGER NOT NULL DEFAULT 1,
-      created_at    INTEGER NOT NULL
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      name             TEXT    NOT NULL,
+      relay_url        TEXT    NOT NULL,
+      wallet_pubkey    TEXT    NOT NULL,
+      secret           TEXT    NOT NULL DEFAULT '',
+      encrypted_secret TEXT,
+      active           INTEGER NOT NULL DEFAULT 1,
+      created_at       INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS privacy_settings (
@@ -93,8 +94,20 @@ function init() {
     );
     INSERT OR IGNORE INTO privacy_settings (id) VALUES (1);
   `)
+migrateNwcConnectionsSchema()
 }
+function migrateNwcConnectionsSchema() {
+  const columns = db
+    .prepare('PRAGMA table_info(nwc_connections)')
+    .all()
+    .map(c => c.name)
 
+  if (!columns.includes('encrypted_secret')) {
+    db.prepare(
+      'ALTER TABLE nwc_connections ADD COLUMN encrypted_secret TEXT'
+    ).run()
+  }
+}
 const now = () => Math.floor(Date.now() / 1000)
 
 // ── Settings ──────────────────────────────────────────────────────────────────

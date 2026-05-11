@@ -3,11 +3,19 @@
 const WebSocket = require('ws')
 const { getPublicKey, getSignature, getEventHash, nip04 } = require('nostr-tools')
 const { hexToBytes } = require('@noble/hashes/utils')
-
+const keychain = require('./keychain')
 let activeWs     = null
 let activeConn   = null
 let pendingCalls = new Map()
+async function decryptStoredSecret(row) {
+  if (row.encrypted_secret) {
+    const key = await keychain.getOrCreateKey()
+    return keychain.decrypt(row.encrypted_secret, key)
+  }
 
+  // Backward compatibility with older databases
+  return row.secret
+}
 function parseNwcUri(uri) {
   const normalised = uri.trim()
     .replace('nostr+walletconnect://', 'nwc://')
@@ -91,29 +99,96 @@ async function nwcRequest(method, params = {}) {
   })
 }
 
+
 async function connect(DB, { nwcUri, name }) {
   const parsed = parseNwcUri(nwcUri)
+
   await openWs(parsed.relay, parsed.pubkey, parsed.secret)
+
+  const key = await keychain.getOrCreateKey()
+  const encryptedSecret = keychain.encrypt(parsed.secret, key)
+
   const db = DB._db()
+
   db.prepare('UPDATE nwc_connections SET active=0').run()
+
   const r = db
-    .prepare('INSERT INTO nwc_connections(name,relay_url,wallet_pubkey,secret,active,created_at) VALUES(?,?,?,?,1,?)')
-    .run(name || 'My node', parsed.relay, parsed.pubkey, parsed.secret, Math.floor(Date.now() / 1000))
-  activeConn = { relay_url: parsed.relay, wallet_pubkey: parsed.pubkey, secret: parsed.secret }
-  return { id: r.lastInsertRowid, name, relay: parsed.relay, pubkey: parsed.pubkey, active: true }
+    .prepare(`
+      INSERT INTO nwc_connections
+      (name, relay_url, wallet_pubkey, secret, encrypted_secret, active, created_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?)
+    `)
+    .run(
+      name || 'My node',
+      parsed.relay,
+      parsed.pubkey,
+      '', // legacy field intentionally blank
+      encryptedSecret,
+      Math.floor(Date.now() / 1000)
+    )
+
+  activeConn = {
+    relay_url: parsed.relay,
+    wallet_pubkey: parsed.pubkey,
+    secret: parsed.secret,
+  }
+
+  return {
+    id: r.lastInsertRowid,
+    name,
+    relay: parsed.relay,
+    pubkey: parsed.pubkey,
+    active: true,
+  }
 }
 
 async function reconnectFromDB(DB) {
-  const row = DB._db().prepare('SELECT * FROM nwc_connections WHERE active=1').get()
+  const row = DB._db()
+    .prepare('SELECT * FROM nwc_connections WHERE active=1')
+    .get()
+
   if (!row) return false
+
   try {
-    await openWs(row.relay_url, row.wallet_pubkey, row.secret)
-    activeConn = row
+    const secret = await decryptStoredSecret(row)
+
+    await openWs(
+      row.relay_url,
+      row.wallet_pubkey,
+      secret
+    )
+
+    // Auto-migrate legacy plaintext entries
+    if (!row.encrypted_secret && row.secret) {
+      const key = await keychain.getOrCreateKey()
+      const encryptedSecret = keychain.encrypt(row.secret, key)
+
+      DB._db()
+        .prepare(`
+          UPDATE nwc_connections
+          SET encrypted_secret = ?, secret = ''
+          WHERE id = ?
+        `)
+        .run(encryptedSecret, row.id)
+    }
+
+    activeConn = {
+      ...row,
+      secret,
+    }
+
     return true
-  } catch (_) {
+  } catch (err) {
+    console.error('Failed to reconnect NWC:', err.message)
     return false
   }
 }
+
+
+
+
+
+
 
 function disconnect(DB) {
   if (activeWs) { try { activeWs.close() } catch (_) {} activeWs = null }
