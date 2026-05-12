@@ -26,6 +26,9 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+      
+      - name: Build renderer
+        run: npx vite build --config src/renderer/vite.config.ts
 
       - name: Build Linux packages
         run: npx electron-builder --linux AppImage deb rpm --publish never
@@ -55,6 +58,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Build renderer
+        run: npx vite build --config src/renderer/vite.config.ts
+ 
       - name: Build Windows installer
         run: npx electron-builder --win nsis --publish never
 
