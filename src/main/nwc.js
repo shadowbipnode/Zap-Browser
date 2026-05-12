@@ -64,10 +64,19 @@ function openWs(relayUrl, walletPubkey, secretHex) {
         let pendingKey = requestId
 
         // Legacy fallback for wallet services that do not return an e tag.
-        // This keeps compatibility but still prefers proper NIP-47 correlation.
+        // Only safe when exactly one request is pending.
         if (!pending) {
+          if (pendingCalls.size !== 1) {
+            console.warn('[NWC] Response without request correlation ignored', {
+              requestId,
+              pending: pendingCalls.size,
+            })
+            return
+          }
+
           const first = pendingCalls.entries().next()
           if (first.done) return
+
           pendingKey = first.value[0]
           pending = first.value[1]
         }
