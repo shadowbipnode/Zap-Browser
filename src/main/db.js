@@ -101,11 +101,14 @@ function init() {
       ua_mode        TEXT    NOT NULL DEFAULT 'rotate',
       custom_ua      TEXT,
       doh_enabled    INTEGER NOT NULL DEFAULT 1,
-      doh_provider   TEXT    NOT NULL DEFAULT 'https://cloudflare-dns.com/dns-query'
+      doh_provider   TEXT    NOT NULL DEFAULT 'https://cloudflare-dns.com/dns-query',
+      popup_block    INTEGER NOT NULL DEFAULT 1,
+      overlay_block  INTEGER NOT NULL DEFAULT 1
     );
     INSERT OR IGNORE INTO privacy_settings (id) VALUES (1);
   `)
 migrateNwcConnectionsSchema()
+migratePrivacySettingsSchema()
 }
 function migrateNwcConnectionsSchema() {
   const columns = db
@@ -119,6 +122,22 @@ function migrateNwcConnectionsSchema() {
     ).run()
   }
 }
+
+function migratePrivacySettingsSchema() {
+  const columns = db
+    .prepare('PRAGMA table_info(privacy_settings)')
+    .all()
+    .map(c => c.name)
+
+  if (!columns.includes('popup_block')) {
+    db.prepare('ALTER TABLE privacy_settings ADD COLUMN popup_block INTEGER NOT NULL DEFAULT 1').run()
+  }
+
+  if (!columns.includes('overlay_block')) {
+    db.prepare('ALTER TABLE privacy_settings ADD COLUMN overlay_block INTEGER NOT NULL DEFAULT 1').run()
+  }
+}
+
 const now = () => Math.floor(Date.now() / 1000)
 
 // ── Settings ──────────────────────────────────────────────────────────────────

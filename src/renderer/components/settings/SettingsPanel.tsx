@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { t, getLang, setLang } from '../../i18n'
+import { THEMES, getTheme, setTheme, ThemeName } from '../../theme'
 
 const z = () => (window as any).zap
 type Sec = 'privacy'|'lightning'|'cashu'|'nostr'|'v4v'|'browser'|'history'|'about'
@@ -13,6 +14,7 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
   const [appVersion, setAppVersion] = useState('')
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [theme, setThemeS] = useState<ThemeName>(getTheme())
   const [, forceUpdate]    = useState(0)
 
   useEffect(() => {
@@ -28,6 +30,8 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
   const togglePriv = async (key: string) => {
     if (key==='adblock')  { await z()?.setAdblock({enabled:!priv?.adblock}) }
     else if (key==='webrtc') { await z()?.setWebRTC({enabled:!priv?.webrtc_protect}) }
+    else if (key==='popup_block') { await z()?.setPopupBlock({enabled:!priv?.popup_block}) }
+    else if (key==='overlay_block') { await z()?.setOverlayBlock({enabled:!priv?.overlay_block}) }
     else if (key==='doh')    { await z()?.setDoh({enabled:!priv?.dohEnabled}) }
     z()?.getPrivacy().then(setPriv)
   }
@@ -82,6 +86,25 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
               fontFamily:'var(--ff)',fontSize:11.5,fontWeight:600,cursor:'pointer',
             }}>{s.l}</button>
           ))}
+
+          {/* Theme selector */}
+          <div style={{marginTop:16,padding:'0 5px'}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:'var(--t2)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:6}}>
+              Theme
+            </div>
+            {THEMES.map(th=>(
+              <button key={th.id} onClick={()=>{
+                setTheme(th.id)
+                setThemeS(th.id)
+              }} style={{
+                display:'block',width:'100%',textAlign:'left',
+                padding:'6px 9px',border:'none',borderRadius:'var(--r-sm)',marginBottom:2,
+                background:theme===th.id?'var(--a-glow)':'none',
+                color:theme===th.id?'var(--a)':'var(--t1)',
+                fontFamily:'var(--ff)',fontSize:10.5,fontWeight:700,cursor:'pointer',
+              }}>{th.label}</button>
+            ))}
+          </div>
 
           {/* Language selector */}
           <div style={{marginTop:16,padding:'0 5px'}}>

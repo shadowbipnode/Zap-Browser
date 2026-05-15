@@ -201,6 +201,11 @@ function createMainView() {
   // Same-origin links may open in the current tab.
   // Cross-origin windows are usually popups/popunders/interstitial ads and are blocked.
   view.webContents.setWindowOpenHandler(({ url }) => {
+    const priv = DB.getPrivacy()
+    if (!priv.adblock) {
+      return { action: 'allow' }
+    }
+
     try {
       const currentUrl = view.webContents.getURL()
       const currentOrigin = new URL(currentUrl).origin
@@ -446,6 +451,8 @@ ipcMain.handle('get-privacy', () => ({
 }))
 ipcMain.handle('set-adblock',  (_, { enabled }) => DB.setPrivacy('adblock', enabled ? 1 : 0))
 ipcMain.handle('set-webrtc',   (_, { enabled }) => DB.setPrivacy('webrtc_protect', enabled ? 1 : 0))
+ipcMain.handle('set-popup-block', (_, { enabled }) => DB.setPrivacy('popup_block', enabled ? 1 : 0))
+ipcMain.handle('set-overlay-block', (_, { enabled }) => DB.setPrivacy('overlay_block', enabled ? 1 : 0))
 ipcMain.handle('set-ua-mode',  (_, { mode }) => {
   DB.setPrivacy('ua_mode', mode)
   if (mode === 'rotate') currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]

@@ -558,3 +558,153 @@ textarea.inp { resize: vertical; min-height: 72px; font-family: var(--mono); fon
   color: var(--t1); word-break: break-all; line-height: 1.5; margin-top: 10px;
   user-select: text;
 }
+
+/* ── Themes ───────────────────────────────────────────────────────────────── */
+
+/* Current/default theme */
+html[data-theme="amber"] {
+  --bg-0: #080809;
+  --bg-1: #0f0f12;
+  --bg-2: #16161b;
+  --bg-3: #1c1c22;
+  --bg-4: #232329;
+
+  --b0: rgba(255,255,255,0.04);
+  --b1: rgba(255,255,255,0.08);
+  --b2: rgba(255,255,255,0.14);
+  --b3: rgba(255,255,255,0.22);
+
+  --a:      #f5a623;
+  --a-dim:  rgba(245,166,35,0.14);
+  --a-glow: rgba(245,166,35,0.06);
+
+  --green: #34d399;
+  --green-bg: rgba(52,211,153,0.10);
+  --red: #f87171;
+  --red-bg: rgba(248,113,113,0.10);
+  --blue: #60a5fa;
+  --blue-bg: rgba(96,165,250,0.10);
+  --purple: #c084fc;
+
+  --t0: #f2f2f5;
+  --t1: #a0a0b0;
+  --t2: #60606f;
+
+  --sh-a: 0 0 24px rgba(245,166,35,.18);
+}
+
+/* Premium glass / Nostr neon */
+html[data-theme="glass"] {
+  --bg-0: #060712;
+  --bg-1: rgba(13,15,31,0.92);
+  --bg-2: rgba(22,24,47,0.86);
+  --bg-3: rgba(31,34,67,0.78);
+  --bg-4: rgba(48,50,92,0.72);
+
+  --b0: rgba(196,181,253,0.08);
+  --b1: rgba(196,181,253,0.14);
+  --b2: rgba(196,181,253,0.24);
+  --b3: rgba(196,181,253,0.36);
+
+  --a: #a78bfa;
+  --a-dim: rgba(167,139,250,0.18);
+  --a-glow: rgba(167,139,250,0.12);
+
+  --green: #2dd4bf;
+  --green-bg: rgba(45,212,191,0.13);
+  --red: #fb7185;
+  --red-bg: rgba(251,113,133,0.12);
+  --blue: #38bdf8;
+  --blue-bg: rgba(56,189,248,0.14);
+  --purple: #d946ef;
+
+  --t0: #f8f7ff;
+  --t1: #b8b5d6;
+  --t2: #777295;
+
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+
+  --sh-sm: 0 4px 18px rgba(0,0,0,.35);
+  --sh-md: 0 10px 34px rgba(0,0,0,.50);
+  --sh-lg: 0 22px 70px rgba(0,0,0,.70);
+  --sh-a: 0 0 34px rgba(167,139,250,.26);
+}
+
+/* Clean professional light-ish dark */
+html[data-theme="minimal"] {
+  --bg-0: #111318;
+  --bg-1: #171a21;
+  --bg-2: #1f232b;
+  --bg-3: #272c35;
+  --bg-4: #303744;
+
+  --b0: rgba(255,255,255,0.06);
+  --b1: rgba(255,255,255,0.10);
+  --b2: rgba(255,255,255,0.16);
+  --b3: rgba(255,255,255,0.24);
+
+  --a: #7dd3fc;
+  --a-dim: rgba(125,211,252,0.16);
+  --a-glow: rgba(125,211,252,0.08);
+
+  --green: #86efac;
+  --green-bg: rgba(134,239,172,0.11);
+  --red: #fca5a5;
+  --red-bg: rgba(252,165,165,0.10);
+  --blue: #93c5fd;
+  --blue-bg: rgba(147,197,253,0.12);
+  --purple: #c4b5fd;
+
+  --t0: #f5f7fb;
+  --t1: #b8c0cc;
+  --t2: #727b89;
+
+  --r-sm: 7px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+
+  --sh-a: 0 0 20px rgba(125,211,252,.16);
+}
+
+/* Hacker / sovereign terminal style */
+html[data-theme="sovereign"] {
+  --bg-0: #020403;
+  --bg-1: #06100b;
+  --bg-2: #0a1710;
+  --bg-3: #0f2118;
+  --bg-4: #173023;
+
+  --b0: rgba(74,222,128,0.06);
+  --b1: rgba(74,222,128,0.12);
+  --b2: rgba(74,222,128,0.22);
+  --b3: rgba(74,222,128,0.34);
+
+  --a: #4ade80;
+  --a-dim: rgba(74,222,128,0.16);
+  --a-glow: rgba(74,222,128,0.08);
+
+  --green: #22c55e;
+  --green-bg: rgba(34,197,94,0.12);
+  --red: #ef4444;
+  --red-bg: rgba(239,68,68,0.11);
+  --blue: #38bdf8;
+  --blue-bg: rgba(56,189,248,0.11);
+  --purple: #84cc16;
+
+  --t0: #e8ffe9;
+  --t1: #9fbea4;
+  --t2: #55715c;
+
+  --ff: 'JetBrains Mono', monospace;
+
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+
+  --sh-a: 0 0 26px rgba(74,222,128,.18);
+}

@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('zap', {
   getPrivacy:       () => ipcRenderer.invoke('get-privacy'),
   setAdblock:       (a) => ipcRenderer.invoke('set-adblock', a),
   setWebRTC:        (a) => ipcRenderer.invoke('set-webrtc', a),
+  setPopupBlock:    (a) => ipcRenderer.invoke('set-popup-block', a),
+  setOverlayBlock:  (a) => ipcRenderer.invoke('set-overlay-block', a),
   setUAMode:        (a) => ipcRenderer.invoke('set-ua-mode', a),
   rotateUA:         () => ipcRenderer.invoke('rotate-ua'),
   getBlockedCount:  () => ipcRenderer.invoke('get-blocked-count'),
