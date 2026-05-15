@@ -1,10 +1,13 @@
-name: Build Release
+name: Build and Publish Release
 
 on:
   workflow_dispatch:
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   build-linux:
@@ -26,7 +29,7 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
-      
+
       - name: Build renderer
         run: npx vite build --config src/renderer/vite.config.ts
 
@@ -41,7 +44,6 @@ jobs:
             dist/*.AppImage
             dist/*.deb
             dist/*.rpm
-            dist/latest-linux.yml
 
   build-windows:
     name: Build Windows
@@ -60,9 +62,9 @@ jobs:
 
       - name: Build renderer
         run: npx vite build --config src/renderer/vite.config.ts
- 
-      - name: Build Windows installer
-        run: npx electron-builder --win nsis --publish never
+
+      - name: Build Windows installer and portable builds
+        run: npx electron-builder --win nsis portable zip --publish never
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -70,5 +72,67 @@ jobs:
           name: zap-browser-windows
           path: |
             dist/*.exe
+            dist/*.zip
             dist/*.blockmap
-            dist/latest.yml
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    needs:
+      - build-linux
+      - build-windows
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create release notes
+        run: |
+          cat > RELEASE_NOTES.md <<'NOTES'
+          ## Zap Browser v0.3.6-beta
+
+          UX, privacy and release-infrastructure update.
+
+          ### Added
+          - Built-in update checker
+          - Version badge in the main browser UI
+          - Startup notification when a new release is available
+          - Theme engine with multiple selectable themes
+          - Session-only NIP-07 permissions
+          - Clear all NIP-07 permissions action
+          - Improved popup, popunder and overlay blocking
+          - Basic aggressive ad skin cleanup
+
+          ### Improved
+          - English is now the default language
+          - Language switching is reactive across key UI areas
+          - Settings/About version display
+          - GitHub Actions release automation
+          - Linux and Windows release packaging
+
+          ### Builds
+          - Linux AppImage
+          - Debian package
+          - RPM package
+          - Windows NSIS installer
+          - Windows portable/zip builds
+
+          ### Notes
+          This is still beta software intended for testing and feedback.
+
+          Windows builds are experimental.
+          NOTES
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Zap Browser ${{ github.ref_name }} — Themes, Updates & Privacy Hardening
+          body_path: RELEASE_NOTES.md
+          files: |
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.zip
+            release-artifacts/**/*.blockmap
