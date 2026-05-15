@@ -6,6 +6,7 @@ import NostrPanel     from '../components/nostr/NostrPanel'
 import FavoritesPanel from '../components/browser/FavoritesPanel'
 import SettingsPanel  from '../components/settings/SettingsPanel'
 import NewTabPage     from '../components/browser/NewTabPage'
+import { useLang } from '../useLang'
 
 export type Panel = 'wallet'|'nostr'|'favorites'|'settings'|null
 
@@ -15,6 +16,7 @@ interface TabState {
 }
 
 export default function BrowserPage() {
+  const { L } = useLang()
   const { tabs, activeId, addTab, closeTab, setActive, updateTab, navigate } = useBrowser()
   const [panel, setPanel]       = useState<Panel>(null)
   const [addrVal, setAddrVal]   = useState('')
@@ -256,11 +258,11 @@ export default function BrowserPage() {
           <button onClick={() => (window as any).zap?.openDevTools?.()}
             title="DevTools" style={{ background:'none', border:'none', color:'var(--t2)', fontSize:11, cursor:'pointer', padding:'0 2px', opacity:0.5 }}>🛠</button>
           <button onClick={() => window.zap?.minimize()}
-            title="Minimizza" style={{ width:13, height:13, borderRadius:'50%', background:'#ffbd2e', border:'none', cursor:'pointer' }} />
+            title={L('Minimizza','Minimize')} style={{ width:13, height:13, borderRadius:'50%', background:'#ffbd2e', border:'none', cursor:'pointer' }} />
           <button onClick={() => window.zap?.maximize()}
-            title="Ingrandisci" style={{ width:13, height:13, borderRadius:'50%', background:'#27c93f', border:'none', cursor:'pointer' }} />
+            title={L('Ingrandisci','Maximize')} style={{ width:13, height:13, borderRadius:'50%', background:'#27c93f', border:'none', cursor:'pointer' }} />
           <button onClick={() => window.zap?.close()}
-            title="Chiudi" style={{ width:13, height:13, borderRadius:'50%', background:'#ff5f56', border:'none', cursor:'pointer' }} />
+            title={L('Chiudi','Close')} style={{ width:13, height:13, borderRadius:'50%', background:'#ff5f56', border:'none', cursor:'pointer' }} />
         </div>
       </div>
 
@@ -270,7 +272,7 @@ export default function BrowserPage() {
           <div key={t.id} className={`tab ${t.id === activeId ? 'active' : ''}`}
             onClick={() => handleSwitchTab(t.id)}>
             <span className="tab-icon">🌐</span>
-            <span className="tab-label">{t.loading ? 'Caricamento...' : t.title || 'Nuova Scheda'}</span>
+            <span className="tab-label">{t.loading ? L('Caricamento...','Loading...') : t.title || L('Nuova Scheda','New Tab')}</span>
             <button className="tab-x" onClick={e => { e.stopPropagation(); handleCloseTab(t.id) }}>×</button>
           </div>
         ))}
@@ -314,7 +316,7 @@ export default function BrowserPage() {
             onChange={e => handleAddrInput(e.target.value)}
             onKeyDown={handleAddrKey}
             onFocus={e => e.target.select()}
-            placeholder="Cerca o inserisci URL, invoice Lightning, token Cashu..."
+            placeholder={L('Cerca o inserisci URL, invoice Lightning, token Cashu...','Search or enter URL, Lightning invoice, Cashu token...')}
             spellCheck={false}
             autoFocus
           />

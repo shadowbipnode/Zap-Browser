@@ -1,4 +1,5 @@
 import { useState, KeyboardEvent } from 'react'
+import { useLang } from '../../useLang'
 
 const LINKS = [
   { l:'Damus',      url:'https://damus.io',           bg:'#1a1033', i:'🟣' },
@@ -13,6 +14,7 @@ const LINKS = [
 ]
 
 export default function NewTabPage({ onNavigate }: { onNavigate: (url:string)=>void }) {
+  const { L } = useLang()
   const [q, setQ] = useState('')
   const go = (e: KeyboardEvent) => {
     if (e.key !== 'Enter' || !q.trim()) return
@@ -73,7 +75,7 @@ export default function NewTabPage({ onNavigate }: { onNavigate: (url:string)=>v
         <span style={{color:'rgba(255,255,255,0.4)',fontSize:14}}>🔍</span>
         <input
           style={{background:'none',border:'none',outline:'none',color:'#fff',fontSize:14,width:'100%'}}
-          placeholder="Cerca o inserisci URL, Invoice Lightning, Cashu Token..."
+          placeholder={L('Cerca o inserisci URL, Invoice Lightning, Cashu Token...','Search or enter URL, Lightning invoice, Cashu token...')}
           value={q} onChange={e => setQ(e.target.value)} onKeyDown={go} autoFocus
         />
       </div>

@@ -134,7 +134,7 @@ const translations = {
   }
 } as const
 
-let currentLang: Lang = (localStorage.getItem('zap-lang') as Lang) || 'it'
+let currentLang: Lang = (localStorage.getItem('zap-lang') as Lang) || 'en'
 
 export function t(key: keyof typeof translations.it): string {
   return (translations[currentLang] as any)[key] || (translations.it as any)[key] || key
