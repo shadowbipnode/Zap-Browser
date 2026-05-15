@@ -1,5 +1,5 @@
 'use strict'
-const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell } = require('electron')
+const { app, BrowserWindow, BrowserView, ipcMain, session, dialog } = require('electron')
 const path   = require('path')
 const DB     = require('./db')
 const wallet = require('./wallet')
@@ -29,7 +29,7 @@ const UA_POOL = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
 ]
 let currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-const nostrSessionPermissions = new Map()
+const nostrPermissions = new Map()
 
 function getIpcOrigin(ipcEvent) {
   const url =
@@ -84,17 +84,6 @@ function summarizeNostrRequest(action, payload) {
 }
 async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
   const origin = getIpcOrigin(ipcEvent)
-  const key = `${origin}:${action}`
-
-  const sessionDecision = nostrSessionPermissions.get(key)
-
-  if (sessionDecision === 'allow') {
-    return true
-  }
-
-  if (sessionDecision === 'deny') {
-    return false
-  }
 
   const stored = DB.getNostrPermission(origin, action)
 
@@ -118,16 +107,11 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
       '',
       'Only approve this request if you trust this website.',
     ].join('\n'),
-    buttons: ['Allow for session', 'Always allow', 'Always deny', 'Deny for session'],
+    buttons: ['Allow once', 'Always allow', 'Always deny', 'Deny once'],
     defaultId: 0,
     cancelId: 3,
     noLink: true,
   })
-
-  if (result.response === 0) {
-    nostrSessionPermissions.set(key, 'allow')
-    return true
-  }
 
   if (result.response === 1) {
     DB.setNostrPermission(origin, action, 'allow')
@@ -139,8 +123,7 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
     return false
   }
 
-  nostrSessionPermissions.set(key, 'deny')
-  return false
+  return result.response === 0
 }
 
 function createMainView() {
@@ -197,33 +180,10 @@ function createMainView() {
     }
   })
 
-  // Popup / new-window protection.
-  // Same-origin links may open in the current tab.
-  // Cross-origin windows are usually popups/popunders/interstitial ads and are blocked.
+  // Open links targeted at new windows in the current tab instead
   view.webContents.setWindowOpenHandler(({ url }) => {
-    try {
-      const currentUrl = view.webContents.getURL()
-      const currentOrigin = new URL(currentUrl).origin
-      const targetOrigin = new URL(url).origin
-
-      if (currentOrigin === targetOrigin) {
-        view.webContents.loadURL(url)
-        return { action: 'deny' }
-      }
-
-      bl.incrementBlocked()
-      mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
-      mainWindow?.webContents.send('popup-blocked', {
-        url,
-        origin: targetOrigin,
-        source: currentOrigin,
-      })
-
-      return { action: 'deny' }
-    } catch (_) {
-      mainWindow?.webContents.send('popup-blocked', { url })
-      return { action: 'deny' }
-    }
+    view.webContents.loadURL(url)
+    return { action: 'deny' }
   })
 
   // Suppress the browser's unload dialog so closing a tab is never blocked
@@ -496,7 +456,6 @@ ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1')
 ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
 ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
 ipcMain.handle('nostr-list-permissions', () => DB.listNostrPermissions())
-ipcMain.handle('nostr-clear-permissions', () => DB.clearNostrPermissions())
 ipcMain.handle('nostr-remove-permission', (_, { origin, action }) => {
   if (!origin || !action) throw new Error('Invalid permission')
   return DB.removeNostrPermission(origin, action)
@@ -626,49 +585,6 @@ ipcMain.handle('cashu-receive',          (_, args) => cashu.receive(DB, args))
 ipcMain.handle('open-devtools', () => {
   if (activeView) activeView.webContents.openDevTools()
   else mainWindow?.webContents.openDevTools()
-})
-
-// ── IPC: updates ─────────────────────────────────────────────────────────────
-ipcMain.handle('get-app-version', () => app.getVersion())
-
-ipcMain.handle('check-for-updates', async () => {
-  const currentVersion = app.getVersion()
-
-  try {
-    const res = await fetch('https://api.github.com/repos/shadowbipnode/Zap-Browser/releases/latest', {
-      headers: {
-        'User-Agent': 'Zap-Browser',
-        'Accept': 'application/vnd.github+json',
-      },
-    })
-
-    if (!res.ok) {
-      throw new Error(`GitHub returned ${res.status}`)
-    }
-
-    const release = await res.json()
-    const latestVersion = String(release.tag_name || '').replace(/^v/, '')
-
-    return {
-      ok: true,
-      currentVersion,
-      latestVersion,
-      updateAvailable: latestVersion && latestVersion !== currentVersion,
-      releaseUrl: release.html_url || 'https://github.com/shadowbipnode/Zap-Browser/releases',
-    }
-  } catch (err) {
-    return {
-      ok: false,
-      currentVersion,
-      error: err.message || 'Unable to check for updates',
-      releaseUrl: 'https://github.com/shadowbipnode/Zap-Browser/releases',
-    }
-  }
-})
-
-ipcMain.handle('open-releases-page', () => {
-  shell.openExternal('https://github.com/shadowbipnode/Zap-Browser/releases')
-  return { ok: true }
 })
 
 // ── IPC: history & data ───────────────────────────────────────────────────────

@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('zap', {
   nostrGetProfile:    () => ipcRenderer.invoke('nostr-get-profile'),
   nostrRemoveProfile: () => ipcRenderer.invoke('nostr-remove-profile'),
   nostrListPermissions: () => ipcRenderer.invoke('nostr-list-permissions'),
+  nostrClearPermissions: () => ipcRenderer.invoke('nostr-clear-permissions'),
   nostrRemovePermission: (a) =>
     ipcRenderer.invoke('nostr-remove-permission', a),
   nostrGetRelays:     () => ipcRenderer.invoke('nostr-get-relays'),
@@ -82,6 +83,11 @@ contextBridge.exposeInMainWorld('zap', {
   cashuCheckMintQuote: (a) => ipcRenderer.invoke('cashu-check-mint-quote', a),
   cashuReceive:        (a) => ipcRenderer.invoke('cashu-receive', a),
 
+  // Updates
+  getAppVersion:    () => ipcRenderer.invoke('get-app-version'),
+  checkForUpdates:  () => ipcRenderer.invoke('check-for-updates'),
+  openReleasesPage: () => ipcRenderer.invoke('open-releases-page'),
+
   // Data management
   resetBrowser: () => ipcRenderer.invoke('reset-browser'),
   getHistory:   (a) => ipcRenderer.invoke('get-history', a),
@@ -95,7 +101,7 @@ contextBridge.exposeInMainWorld('zap', {
     const allowed = [
       'tab-updated', 'blocked-count', 'payment-detected', 'app-ready',
       'tab-switched', 'page-features', 'v4v-detected', 'blocklist-ready',
-      'open-new-tab', 'tab-ready',
+      'open-new-tab', 'tab-ready', 'popup-blocked',
     ]
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
   },

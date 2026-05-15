@@ -221,6 +221,11 @@ function removeNostrPermission(origin, action) {
   return { ok: true }
 }
 
+function clearNostrPermissions() {
+  db.prepare('DELETE FROM nostr_permissions').run()
+  return { ok: true }
+}
+
 module.exports = {
   init,
   getSetting, setSetting,
@@ -228,6 +233,6 @@ module.exports = {
   getFavorites, addFavorite, removeFavorite,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
-  getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission,
+  getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission, clearNostrPermissions,
   _db: () => db,
 }

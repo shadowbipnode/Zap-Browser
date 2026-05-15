@@ -262,6 +262,30 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
                   </div>
                 ))
               )}
+
+              {permissions.length > 0 && (
+                <button
+                  style={{
+                    width:'100%',
+                    marginTop:10,
+                    padding:'8px',
+                    border:'1px solid #7f1d1d',
+                    background:'rgba(127,29,29,.15)',
+                    color:'#fca5a5',
+                    borderRadius:'var(--r-sm)',
+                    cursor:'pointer',
+                    fontSize:11,
+                  }}
+                  onClick={async () => {
+                    const ok = window.confirm('Clear all stored NIP-07 permissions?')
+                    if (!ok) return
+                    await window.zap?.nostrClearPermissions()
+                    await load()
+                  }}
+                >
+                  Clear all permissions
+                </button>
+              )}
             </div>
             <button
               style={{

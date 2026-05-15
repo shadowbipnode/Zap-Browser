@@ -1,0 +1,31 @@
+
+> zap-browser@0.3.5 start
+> concurrently "npm run dev:renderer" "wait-on http://localhost:3000 && electron ."
+
+[0] 
+[0] > zap-browser@0.3.5 dev:renderer
+[0] > vite --config src/renderer/vite.config.ts
+[0] 
+[0] [33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+[0] Port 3000 is in use, trying another one...
+[0] 
+[0]   VITE v5.4.21  ready in 172 ms
+[0] 
+[0]   ➜  Local:   http://localhost:3001/
+[0]   ➜  Network: use --host to expose
+[1] [Blocklist] Inizializzazione...
+[1] [Blocklist] Cache easylist OK
+[1] [Blocklist] Cache easyprivacy OK
+[1] [Blocklist] Cache ublock OK
+[1] [Blocklist] Cache ublock-privacy OK
+[1] [Blocklist] Regole cosmetic: 12067
+[1] [Blocklist] Pronto: 105418 domini
+[1] [Blocklist] Scaricato easylist
+[1] [Blocklist] Scaricato easyprivacy
+[1] [Blocklist] Scaricato ublock
+[1] [Blocklist] Scaricato ublock-privacy
+[1] [Blocklist] Regole cosmetic: 12067
+[1] [Blocklist] Aggiornato: 105419 domini
+[0] npm run dev:renderer exited with code SIGINT
+[1] /home/dragonesi/Zap-Browser/node_modules/electron/dist/electron exited with signal SIGINT
+[1] wait-on http://localhost:3000 && electron . exited with code SIGINT

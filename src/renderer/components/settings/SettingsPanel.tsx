@@ -10,12 +10,16 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
   const [bl,     setBl]    = useState<any>(null)
   const [v4vS,   setV4vS]  = useState<any>(null)
   const [lang,   setLangS] = useState(getLang())
+  const [appVersion, setAppVersion] = useState('')
+  const [updateInfo, setUpdateInfo] = useState<any>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [, forceUpdate]    = useState(0)
 
   useEffect(() => {
     z()?.getPrivacy().then(setPriv)
     z()?.getBlocklistInfo().then(setBl)
     z()?.v4vGetSettings().then(setV4vS)
+    z()?.getAppVersion?.().then(setAppVersion)
     const h = () => { setLangS(getLang()); forceUpdate(n=>n+1) }
     window.addEventListener('lang-changed', h)
     return () => window.removeEventListener('lang-changed', h)
@@ -46,6 +50,21 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
     {id:'about',    l:'ℹ️ '+t('about')},
   ]
 
+  const checkUpdates = async () => {
+    setCheckingUpdate(true)
+    setUpdateInfo(null)
+    try {
+      const info = await z()?.checkForUpdates?.()
+      setUpdateInfo(info)
+    } catch (e:any) {
+      setUpdateInfo({
+        ok: false,
+        error: String(e?.message || e),
+      })
+    }
+    setCheckingUpdate(false)
+  }
+
   return (
     <>
       <div className="panel-hd">
@@ -53,7 +72,7 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
         <button className="panel-hd-close" onClick={onClose}>×</button>
       </div>
       <div style={{display:'flex',height:'calc(100% - 53px)'}}>
-        <div style={{width:130,borderRight:'1px solid var(--b0)',padding:'8px 5px',flexShrink:0,overflowY:'auto'}}>
+        <div style={{width:150,borderRight:'1px solid var(--b0)',padding:'8px 5px',flexShrink:0,overflowY:'auto'}}>
           {SECS.map(s=>(
             <button key={s.id} onClick={()=>setSec(s.id)} style={{
               display:'block',width:'100%',textAlign:'left',padding:'8px 9px',
@@ -81,7 +100,7 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
           </div>
         </div>
 
-        <div style={{flex:1,overflow:'auto',padding:14}}>
+        <div style={{flex:1,overflow:'auto',padding:12}}>
 
           {sec==='privacy' && priv && <>
             <div className="sec-title">{t('privacy')}</div>
@@ -96,10 +115,10 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
             <TR label={`🌐 ${t('uaDefault')}`} desc={t('uaDefaultDesc')} on={priv.ua_mode==='default'}
               onToggle={async()=>{ await z()?.setUAMode({mode:'default'}); z()?.getPrivacy().then(setPriv) }} />
             <div className="sec-title" style={{marginTop:18}}>Stats</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr',gap:8}}>
               {[[t('blocked'),(bl?.count||0).toLocaleString()],[t('listSize'),(bl?.size||0).toLocaleString()]].map(([k,v])=>(
                 <div key={k} style={{padding:12,background:'var(--bg-3)',border:'1px solid var(--b0)',borderRadius:'var(--r-sm)',textAlign:'center'}}>
-                  <div style={{fontSize:18,fontWeight:800,color:'var(--a)'}}>{v}</div>
+                  <div style={{fontSize:15,fontWeight:800,color:'var(--a)'}}>{v}</div>
                   <div style={{fontSize:10,color:'var(--t2)',marginTop:2}}>{k}</div>
                 </div>
               ))}
@@ -232,20 +251,65 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
               <div style={{fontSize:20,fontWeight:800,color:'var(--t0)',letterSpacing:'-.03em'}}>
                 Zap<span style={{color:'var(--a)'}}>Browser</span>
               </div>
-              <div style={{fontSize:11.5,color:'var(--t2)',marginTop:4}}>v0.3.0-beta</div>
+              <div style={{fontSize:11.5,color:'var(--t2)',marginTop:4}}>
+                v{appVersion || 'unknown'}-beta
+              </div>
             </div>
+
+            <div style={{
+              padding:12,
+              background:'var(--bg-3)',
+              border:'1px solid var(--b0)',
+              borderRadius:'var(--r-md)',
+              marginBottom:14,
+            }}>
+              <div className="sec-title" style={{marginBottom:8}}>
+                {lang==='it'?'Aggiornamenti':'Updates'}
+              </div>
+
+              <div style={{fontSize:12,color:'var(--t1)',lineHeight:1.6,marginBottom:10}}>
+                {updateInfo
+                  ? updateInfo.ok
+                    ? updateInfo.updateAvailable
+                      ? (lang==='it'
+                          ? `Nuova versione disponibile: v${updateInfo.latestVersion}`
+                          : `New version available: v${updateInfo.latestVersion}`)
+                      : (lang==='it'
+                          ? 'Zap Browser è aggiornato.'
+                          : 'Zap Browser is up to date.')
+                    : (lang==='it'
+                        ? `Controllo aggiornamenti non riuscito: ${updateInfo.error}`
+                        : `Update check failed: ${updateInfo.error}`)
+                  : (lang==='it'
+                      ? 'Controlla se è disponibile una nuova versione.'
+                      : 'Check whether a new version is available.')}
+              </div>
+
+              <div className="act-row">
+                <button className="act-btn primary" disabled={checkingUpdate} onClick={checkUpdates}>
+                  {checkingUpdate
+                    ? (lang==='it'?'Controllo...':'Checking...')
+                    : (lang==='it'?'Controlla aggiornamenti':'Check for updates')}
+                </button>
+                <button className="act-btn" onClick={() => z()?.openReleasesPage?.()}>
+                  GitHub Releases
+                </button>
+              </div>
+            </div>
+
             {[
+              ['Version', appVersion || 'unknown'],
               ['Engine','Chromium via Electron BrowserView'],
               ['Lightning','NWC — Nostr Wallet Connect (NIP-47)'],
               ['Ecash','Cashu — Chaumian ecash'],
-              ['Nostr','NIP-07 native signer + NIP-06 derivation'],
+              ['Nostr','NIP-07 native signer + granular permissions'],
               ['Privacy',`EasyList + EasyPrivacy + uBlock (${(bl?.size||0).toLocaleString()} ${lang==='it'?'domini':'domains'})`],
               ['License','MIT — Free and Open Source'],
               ['Repo','github.com/shadowbipnode/Zap-Browser'],
             ].map(([k,v])=>(
               <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid var(--b0)',fontSize:12}}>
                 <span style={{color:'var(--t2)',fontWeight:600}}>{k}</span>
-                <span style={{color:'var(--t1)',textAlign:'right',maxWidth:180}}>{v}</span>
+                <span style={{color:'var(--t1)',textAlign:'right',maxWidth:130, overflow:'hidden', textOverflow:'ellipsis', wordBreak:'break-word'}}>{v}</span>
               </div>
             ))}
           </>}

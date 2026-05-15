@@ -34,6 +34,10 @@ export default function BrowserPage() {
   const [paying, setPaying]       = useState(false)
   const [suggestions, setSuggestions] = useState<any[]>([])
   const [showSuggest, setShowSuggest] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
+  const [updateInfo, setUpdateInfo] = useState<any>(null)
+  const [showUpdatePopup, setShowUpdatePopup] = useState(false)
+  const [popupBlocked, setPopupBlocked] = useState<any>(null)
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
 
@@ -53,6 +57,15 @@ export default function BrowserPage() {
     return () => window.removeEventListener('favorites-updated', loadFavBar)
   }, [])
 
+  // Load app version / update status
+  useEffect(() => {
+    window.zap?.getAppVersion?.().then(setAppVersion)
+    window.zap?.checkForUpdates?.().then((info: any) => {
+      setUpdateInfo(info)
+      if (info?.ok && info?.updateAvailable) setShowUpdatePopup(true)
+    }).catch(() => {})
+  }, [])
+
   // Listen to events from main process
   useEffect(() => {
     window.zap?.on('tab-updated', (data: any) => {
@@ -68,6 +81,10 @@ export default function BrowserPage() {
       handleNewTab(url)
     })
     window.zap?.on('payment-detected', (data: any) => setPayment(data))
+    window.zap?.on('popup-blocked', (data: any) => {
+      setPopupBlocked(data || {})
+      setTimeout(() => setPopupBlocked(null), 4500)
+    })
 
     // Navigate from history/bookmarks
     const onNavigateTo = (e: any) => {
@@ -255,6 +272,36 @@ export default function BrowserPage() {
           ⚡ Zap Browser
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8, WebkitAppRegion:'no-drag' as any }}>
+          <button
+            onClick={() => setPanel('settings')}
+            title={updateInfo?.updateAvailable ? L('Aggiornamento disponibile','Update available') : L('Versione aggiornata','Up to date')}
+            style={{
+              height:20,
+              padding:'0 9px',
+              borderRadius:999,
+              border:updateInfo?.updateAvailable ? '1px solid #facc15' : '1px solid #22c55e',
+              background:updateInfo?.updateAvailable ? 'rgba(250,204,21,.12)' : 'rgba(34,197,94,.10)',
+              color:updateInfo?.updateAvailable ? '#facc15' : '#22c55e',
+              fontSize:10.5,
+              fontWeight:800,
+              cursor:'pointer',
+              fontFamily:'var(--ff)',
+              display:'flex',
+              alignItems:'center',
+              gap:5,
+            }}
+          >
+            <span style={{
+              width:6,
+              height:6,
+              borderRadius:'50%',
+              background:updateInfo?.updateAvailable ? '#facc15' : '#22c55e',
+              boxShadow:updateInfo?.updateAvailable ? '0 0 8px #facc15' : '0 0 8px #22c55e',
+            }} />
+            {updateInfo?.updateAvailable
+              ? `v${appVersion || '...'} → v${updateInfo.latestVersion}`
+              : `v${appVersion || '...'}`}
+          </button>
           <button onClick={() => (window as any).zap?.openDevTools?.()}
             title="DevTools" style={{ background:'none', border:'none', color:'var(--t2)', fontSize:11, cursor:'pointer', padding:'0 2px', opacity:0.5 }}>🛠</button>
           <button onClick={() => window.zap?.minimize()}
@@ -510,6 +557,81 @@ export default function BrowserPage() {
           </div>
         )}
       </div>
+
+      {showUpdatePopup && updateInfo?.updateAvailable && (
+        <div style={{
+          position:'fixed',
+          top:42,
+          right:18,
+          zIndex:999999,
+          width:320,
+          padding:14,
+          background:'var(--bg-1)',
+          border:'1px solid #facc15',
+          borderRadius:'var(--r-md)',
+          boxShadow:'0 18px 50px rgba(0,0,0,.55)',
+          fontFamily:'var(--ff)',
+        }}>
+          <div style={{
+            fontSize:13,
+            fontWeight:900,
+            color:'#facc15',
+            marginBottom:6,
+          }}>
+            ⚡ {L('Aggiornamento disponibile','Update available')}
+          </div>
+
+          <div style={{
+            fontSize:12,
+            color:'var(--t1)',
+            lineHeight:1.5,
+            marginBottom:12,
+          }}>
+            {L(
+              `Stai usando v${appVersion}. È disponibile v${updateInfo.latestVersion}.`,
+              `You are using v${appVersion}. Version v${updateInfo.latestVersion} is available.`
+            )}
+          </div>
+
+          <div style={{display:'flex',gap:8}}>
+            <button
+              className="act-btn primary"
+              onClick={() => window.zap?.openReleasesPage?.()}
+            >
+              GitHub Releases
+            </button>
+            <button
+              className="act-btn"
+              onClick={() => setShowUpdatePopup(false)}
+            >
+              {L('Chiudi','Close')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {popupBlocked && (
+        <div style={{
+          position:'fixed',
+          top:70,
+          right:18,
+          zIndex:999999,
+          width:300,
+          padding:12,
+          background:'var(--bg-1)',
+          border:'1px solid var(--green)',
+          borderRadius:'var(--r-md)',
+          boxShadow:'0 14px 40px rgba(0,0,0,.55)',
+          fontFamily:'var(--ff)',
+        }}>
+          <div style={{fontSize:13,fontWeight:900,color:'var(--green)',marginBottom:5}}>
+            🛡️ {L('Popup bloccato','Popup blocked')}
+          </div>
+          <div style={{fontSize:11.5,color:'var(--t1)',lineHeight:1.45,wordBreak:'break-all'}}>
+            {popupBlocked.origin || popupBlocked.url || ''}
+          </div>
+        </div>
+      )}
 
       {/* ── Payment popup ─────────────────────────────────────────────── */}
       {payment && (
