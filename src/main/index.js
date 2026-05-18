@@ -284,8 +284,32 @@ function createMainView() {
           }
         }
 
+        function zapKillAdElements() {
+          const adRegex = /(googlesyndication|doubleclick|googleads|adform|adnxs|criteo|taboola|outbrain|mgid|teads|smartadserver|openx|rubicon|yieldlove|prebid|adsbygoogle|pubblicit|sponsor)/i;
+
+          document.querySelectorAll('iframe, ins, .adsbygoogle, [data-ad-slot], [data-ad-client], [data-google-query-id]').forEach(el => {
+            const html = (
+              (el.id || '') + ' ' +
+              (el.className || '') + ' ' +
+              (el.getAttribute?.('src') || '') + ' ' +
+              (el.getAttribute?.('data-ad-slot') || '') + ' ' +
+              (el.getAttribute?.('data-ad-client') || '') + ' ' +
+              (el.getAttribute?.('data-google-query-id') || '')
+            );
+
+            if (adRegex.test(html) || el.tagName === 'IFRAME' || el.tagName === 'INS') {
+              el.style.setProperty('display', 'none', 'important');
+              el.style.setProperty('visibility', 'hidden', 'important');
+              el.style.setProperty('height', '0px', 'important');
+              el.style.setProperty('max-height', '0px', 'important');
+              el.style.setProperty('overflow', 'hidden', 'important');
+            }
+          });
+        }
+
         function zapKillAggressiveOverlays() {
           zapKillAdSkins();
+          zapKillAdElements();
 
           const selectors = [
             '[class*="overlay"]',
@@ -551,11 +575,16 @@ ipcMain.handle('tab-reload',   () => activeView?.webContents.reload())
 
 ipcMain.handle('shell-resize', (_, args) => {
   if (!activeTabId || !tabUrls.get(activeTabId) || !mainWindow || !activeView) return
+
   const { width, height } = mainWindow.getBounds()
+
+  const suggestionsOffset = args?.suggestionsOpen ? 320 : 0
+
   activeView.setBounds({
-    x: 0, y: SHELL_H,
+    x: 0,
+    y: SHELL_H + suggestionsOffset,
     width: width - (args?.panelOpen ? 320 : 0),
-    height: height - SHELL_H,
+    height: height - SHELL_H - suggestionsOffset,
   })
 })
 

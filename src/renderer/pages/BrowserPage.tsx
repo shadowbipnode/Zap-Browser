@@ -155,8 +155,11 @@ export default function BrowserPage() {
 
   // Notify main of panel state for view resize
   useEffect(() => {
-    window.zap?.shellResize({ panelOpen: panel !== null })
-  }, [panel])
+    window.zap?.shellResize({
+      panelOpen: panel !== null,
+      suggestionsOpen: showSuggest
+    })
+  }, [panel, showSuggest])
 
 
   const getActiveOrigin = () => {
@@ -633,22 +636,46 @@ export default function BrowserPage() {
       {/* Suggestions dropdown */}
         {showSuggest && (
           <div style={{
-            position:'fixed', top:114, left:0, right:panel?320:0,
-            background:'var(--bg-1)', border:'1px solid var(--b1)',
-            zIndex:9999, boxShadow:'0 8px 32px rgba(0,0,0,.5)',
-            maxHeight:320, overflowY:'auto',
+            position:'fixed',
+            top:108,
+            left:170,
+            right:panel ? 340 : 24,
+            background:'rgba(15,17,26,.96)',
+            border:'1px solid var(--b1)',
+            zIndex:999999,
+            boxShadow:'0 18px 50px rgba(0,0,0,.55)',
+            borderRadius:'18px',
+            overflow:'hidden',
+            backdropFilter:'blur(18px)',
+            maxHeight:340,
+            overflowY:'auto',
           }}>
             {suggestions.map((s: any, i: number) => (
               <div key={i} style={{
                 display:'flex', alignItems:'center', gap:10,
-                padding:'9px 16px', cursor:'pointer',
+                padding:'10px 16px',
+                cursor:'pointer',
                 borderBottom:'1px solid var(--b0)',
               }}
                 onMouseEnter={e=>(e.currentTarget.style.background='var(--bg-3)')}
                 onMouseLeave={e=>(e.currentTarget.style.background='')}
                 onClick={()=>{ setShowSuggest(false); setAddrVal(s.url); handleNavigate(s.url) }}
               >
-                <span>🕑</span>
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(s.url)}&sz=32`}
+                  alt=""
+                  style={{
+                    width:18,
+                    height:18,
+                    borderRadius:4,
+                    flexShrink:0,
+                    background:'rgba(255,255,255,.04)',
+                  }}
+                  onError={(e:any)=>{
+                    e.currentTarget.style.display='none'
+                  }}
+                />
+
                 <div style={{flex:1,overflow:'hidden'}}>
                   <div style={{fontSize:12.5,fontWeight:600,color:'var(--t0)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.title||s.url}</div>
                   <div style={{fontSize:10.5,color:'var(--t2)',fontFamily:'var(--mono)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.url}</div>
