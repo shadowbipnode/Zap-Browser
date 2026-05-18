@@ -201,16 +201,27 @@ function createMainView() {
   // Popup / new-window protection.
   // Same-origin links may open in the current tab.
   // Cross-origin windows are usually popups/popunders/interstitial ads and are blocked.
-  view.webContents.setWindowOpenHandler(({ url }) => {
+  view.webContents.setWindowOpenHandler(({ url, disposition }) => {
     const priv = DB.getPrivacy()
     if (!priv.adblock) {
-      return { action: 'allow' }
+      view.webContents.loadURL(url)
+      return { action: 'deny' }
     }
 
     try {
       const currentUrl = view.webContents.getURL()
       const currentOrigin = new URL(currentUrl).origin
       const targetOrigin = new URL(url).origin
+
+      const isUserClick =
+        disposition === 'foreground-tab' ||
+        disposition === 'background-tab' ||
+        disposition === 'new-window'
+
+      if (isUserClick) {
+        view.webContents.loadURL(url)
+        return { action: 'deny' }
+      }
 
       if (currentOrigin === targetOrigin) {
         view.webContents.loadURL(url)
@@ -227,6 +238,8 @@ function createMainView() {
 
       return { action: 'deny' }
     } catch (_) {
+      bl.incrementBlocked()
+      mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
       mainWindow?.webContents.send('popup-blocked', { url })
       return { action: 'deny' }
     }

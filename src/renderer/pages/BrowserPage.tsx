@@ -298,10 +298,26 @@ export default function BrowserPage() {
 
   const secIcon = () => {
     const u = activeTab?.url || ''
+
     if (u.startsWith('https')) return '🔒'
     if (u.startsWith('http:')) return '⚠️'
+
     return '⚡'
   }
+
+  const currentOrigin = (() => {
+    try {
+      return new URL(activeTab?.url || '').origin
+    } catch (_) {
+      return null
+    }
+  })()
+
+  const nostrAllowed = sitePermissions.some(
+    (p:any) => p.origin === currentOrigin
+  )
+
+  const blockedRecently = !!popupBlocked
 
   return (
     <div className="app">
@@ -387,7 +403,57 @@ export default function BrowserPage() {
           title="Home"
           style={{ background:'none', border:'none', cursor:'pointer', color:'var(--t2)', fontSize:14, padding:'0 4px', flexShrink:0 }}
         >🏠</button>
-        <div className="addr-wrap" style={{ cursor:'text' }}>
+
+        <div style={{
+          display:'flex',
+          alignItems:'center',
+          gap:6,
+          marginRight:8,
+          marginLeft:4,
+          flexShrink:0,
+        }}>
+          <span title={activeTab?.url?.startsWith('https') ? 'Secure HTTPS connection' : 'Non secure connection'}>
+            {secIcon()}
+          </span>
+
+          {nostrAllowed && (
+            <span
+              title="NIP-07 allowed"
+              style={{
+                color:'var(--a)',
+                fontSize:13,
+                filter:'drop-shadow(0 0 6px rgba(245,166,35,.45))',
+              }}
+            >
+              ⚡
+            </span>
+          )}
+
+          {blockedRecently && (
+            <span
+              title="Popup blocked"
+              style={{
+                color:'var(--red)',
+                fontSize:12,
+              }}
+            >
+              🛡
+            </span>
+          )}
+        </div>
+        <div className="addr-wrap" style={{
+          cursor:'text',
+          position:'relative',
+          border: nostrAllowed
+            ? '1px solid rgba(245,166,35,.45)'
+            : blockedRecently
+              ? '1px solid rgba(248,113,113,.35)'
+              : undefined,
+          boxShadow: nostrAllowed
+            ? '0 0 14px rgba(245,166,35,.12)'
+            : undefined,
+          borderRadius:'var(--r-pill)',
+        }}>
           <button
             title="Site permissions"
             onClick={openSitePermissions}
