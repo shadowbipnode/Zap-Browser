@@ -598,11 +598,29 @@ ipcMain.handle('v4v-get-settings', () => ({
 // ── IPC: wallet setup ─────────────────────────────────────────────────────────
 ipcMain.handle('is-initialized',    () => DB.getSetting('initialized') === '1')
 ipcMain.handle('generate-mnemonic', () => wallet.generateMnemonic())
-ipcMain.handle('validate-mnemonic', (_, { words }) => wallet.validateMnemonic(words))
-ipcMain.handle('setup-wallet',      (_, args) => wallet.setupWallet(DB, args))
+ipcMain.handle('validate-mnemonic', (_, { words }) => {
+  V.assert(typeof words === 'string' && words.length <= 500, 'Invalid mnemonic')
+  return wallet.validateMnemonic(words)
+})
+ipcMain.handle('setup-wallet',      (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid wallet setup payload')
+  if (args.mnemonic != null) {
+    V.assert(typeof args.mnemonic === 'string' && args.mnemonic.length <= 500, 'Invalid mnemonic')
+  }
+  if (args.mode != null) {
+    V.assert(typeof args.mode === 'string' && args.mode.length <= 80, 'Invalid setup mode')
+  }
+  return wallet.setupWallet(DB, args)
+})
 
 // ── IPC: nostr ────────────────────────────────────────────────────────────────
-ipcMain.handle('nostr-create-profile', (_, args) => nostr.createProfile(DB, args))
+ipcMain.handle('nostr-create-profile', (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid profile payload')
+  if (args.name != null) {
+    V.assert(typeof args.name === 'string' && args.name.length <= 120, 'Invalid name')
+  }
+  return nostr.createProfile(DB, args)
+})
 ipcMain.handle('nostr-import-nsec',    (_, args) => {
   V.validateNsec(args?.nsec)
 
@@ -720,10 +738,12 @@ ipcMain.handle('nostr-nip04-decrypt', async (ipcEvent, { pubkey, text }) => {
 })
 // ── IPC: LNURL / Lightning Address ────────────────────────────────────────────
 ipcMain.handle('lnurl-is-lightning-address', (_, { value }) => {
+  V.assert(typeof value === 'string' && value.length <= 500, 'Invalid Lightning Address')
   return lnurl.isLightningAddress(value)
 })
 
 ipcMain.handle('lnurl-fetch-pay-params', (_, { address }) => {
+  V.assert(typeof address === 'string' && address.length <= 500, 'Invalid Lightning Address')
   return lnurl.fetchPayParams(address)
 })
 
@@ -767,8 +787,17 @@ ipcMain.handle('decode-invoice',  (_, { bolt11 }) => {
 
 // ── IPC: favorites ────────────────────────────────────────────────────────────
 ipcMain.handle('get-favorites',   () => DB.getFavorites())
-ipcMain.handle('add-favorite',    (_, args) => DB.addFavorite(args))
-ipcMain.handle('remove-favorite', (_, { id }) => DB.removeFavorite(id))
+ipcMain.handle('add-favorite',    (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid favorite payload')
+  V.assert(typeof args.url === 'string' && args.url.length <= 3000, 'Invalid URL')
+  if (args.title != null) V.assert(typeof args.title === 'string' && args.title.length <= 300, 'Invalid title')
+  if (args.favicon != null) V.assert(typeof args.favicon === 'string' && args.favicon.length <= 5000, 'Invalid favicon')
+  return DB.addFavorite(args)
+})
+ipcMain.handle('remove-favorite', (_, { id }) => {
+  V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
+  return DB.removeFavorite(id)
+})
 ipcMain.handle('import-favorites-html', (_, { html }) => {
   const results = []
   const linkRe  = /<A[^>]+HREF="([^"]+)"[^>]*>([^<]+)<\/A>/gi
@@ -795,10 +824,28 @@ ipcMain.handle('cashu-add-mint', (_, { url }) => {
   if (!url || typeof url !== 'string' || !url.startsWith('https://')) throw new Error('Invalid mint URL')
   return cashu.addMint(DB, { url })
 })
-ipcMain.handle('cashu-remove-mint',      (_, { url }) => DB.cashuRemoveMint(url))
-ipcMain.handle('cashu-mint-tokens',      (_, args) => cashu.mintTokens(DB, args))
-ipcMain.handle('cashu-check-mint-quote', (_, args) => cashu.checkMintQuote(DB, args))
-ipcMain.handle('cashu-receive',          (_, args) => cashu.receive(DB, args))
+ipcMain.handle('cashu-remove-mint',      (_, { url }) => {
+  V.assert(typeof url === 'string' && url.length <= 3000, 'Invalid mint URL')
+  return DB.cashuRemoveMint(url)
+})
+ipcMain.handle('cashu-mint-tokens',      (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid Cashu mint payload')
+  V.assert(Number.isSafeInteger(Number(args.amount)) && Number(args.amount) > 0, 'Invalid amount')
+  V.assert(typeof args.mintUrl === 'string' && args.mintUrl.length <= 3000, 'Invalid mint URL')
+  return cashu.mintTokens(DB, args)
+})
+ipcMain.handle('cashu-check-mint-quote', (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid Cashu quote payload')
+  V.assert(typeof args.quote === 'string' && args.quote.length <= 3000, 'Invalid quote')
+  V.assert(Number.isSafeInteger(Number(args.amount)) && Number(args.amount) > 0, 'Invalid amount')
+  V.assert(typeof args.mintUrl === 'string' && args.mintUrl.length <= 3000, 'Invalid mint URL')
+  return cashu.checkMintQuote(DB, args)
+})
+ipcMain.handle('cashu-receive',          (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid Cashu receive payload')
+  V.assert(typeof args.token === 'string' && args.token.length <= 200000, 'Invalid Cashu token')
+  return cashu.receive(DB, args)
+})
 
 // ── IPC: devtools ─────────────────────────────────────────────────────────────
 ipcMain.handle('open-devtools', () => {
@@ -850,7 +897,11 @@ ipcMain.handle('open-releases-page', () => {
 })
 
 // ── IPC: history & data ───────────────────────────────────────────────────────
-ipcMain.handle('get-history',   (_, { limit } = {}) => DB.getHistory(limit || 100))
+ipcMain.handle('get-history',   (_, { limit } = {}) => {
+  const safeLimit = Number(limit || 100)
+  V.assert(Number.isSafeInteger(safeLimit) && safeLimit > 0 && safeLimit <= 1000, 'Invalid history limit')
+  return DB.getHistory(safeLimit)
+})
 ipcMain.handle('clear-history', () => DB.clearHistory())
 ipcMain.handle('clear-cookies', async () => {
   await session.defaultSession.clearStorageData({
