@@ -708,3 +708,63 @@ html[data-theme="sovereign"] {
 
   --sh-a: 0 0 26px rgba(74,222,128,.18);
 }
+
+/* ── v0.3.7 UI polish ─────────────────────────────────────────────────────── */
+
+.toolbar,
+.tabbar,
+.side-panel,
+.panel-hd,
+.inv-popup {
+  backdrop-filter: blur(18px);
+}
+
+button,
+.act-btn,
+.w-tab,
+.tab,
+.addr,
+.inp {
+  transition:
+    background .18s var(--ease),
+    border-color .18s var(--ease),
+    color .18s var(--ease),
+    box-shadow .18s var(--ease),
+    transform .12s var(--ease);
+}
+
+.act-btn:hover,
+.w-tab:hover,
+.tab:hover {
+  transform: translateY(-1px);
+}
+
+.addr:focus,
+.inp:focus {
+  box-shadow: var(--sh-a);
+  border-color: var(--a);
+}
+
+.bal-card {
+  box-shadow: var(--sh-md);
+  border: 1px solid var(--b1);
+}
+
+html[data-theme="glass"] .toolbar,
+html[data-theme="glass"] .tabbar,
+html[data-theme="glass"] .side-panel,
+html[data-theme="glass"] .panel-hd {
+  background: rgba(13,15,31,.72);
+  backdrop-filter: blur(22px);
+}
+
+html[data-theme="sovereign"] .addr,
+html[data-theme="sovereign"] .inp,
+html[data-theme="sovereign"] .bal-card {
+  box-shadow: inset 0 0 0 1px rgba(74,222,128,.05);
+}
+
+html[data-theme="minimal"] .toolbar,
+html[data-theme="minimal"] .tabbar {
+  box-shadow: none;
+}
