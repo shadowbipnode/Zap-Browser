@@ -89,6 +89,17 @@ function NWCTab() {
             : undefined
         })
 
+        const ok = window.confirm(
+          `${L('Confermi pagamento Lightning?','Confirm Lightning payment?')}\n\n` +
+          `${sats.toLocaleString()} sats\n` +
+          `${target}`
+        )
+
+        if (!ok) {
+          setLoading(false)
+          return
+        }
+
         const payResult = await zap()?.nwcPayInvoice({invoice:inv.invoice})
 
         window.dispatchEvent(new CustomEvent('zap-payment-success', {
@@ -99,13 +110,26 @@ function NWCTab() {
         }))
       }else{
         const decoded = await zap()?.decodeInvoice?.({ bolt11: target })
+        const decodedSats = decoded?.amountMsat
+          ? Math.floor(decoded.amountMsat / 1000)
+          : null
+
+        const ok = window.confirm(
+          `${L('Confermi pagamento Lightning?','Confirm Lightning payment?')}\n\n` +
+          `${decodedSats ? decodedSats.toLocaleString() + ' sats' : L('Importo non rilevato','Amount not detected')}\n` +
+          `${target.slice(0, 80)}...`
+        )
+
+        if (!ok) {
+          setLoading(false)
+          return
+        }
+
         const payResult = await zap()?.nwcPayInvoice({invoice:target})
 
         window.dispatchEvent(new CustomEvent('zap-payment-success', {
           detail: {
-            amount: decoded?.amountMsat
-              ? Math.floor(decoded.amountMsat / 1000)
-              : null,
+            amount: decodedSats,
             preimage: payResult?.preimage || null,
           }
         }))
