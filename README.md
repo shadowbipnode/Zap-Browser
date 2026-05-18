@@ -92,6 +92,7 @@ Features:
 * NIP-06 deterministic key derivation
 * nsec import/replacement
 * Visual trust indicators
+* Permission-aware toolbar indicators
 
 The browser never publishes events automatically.
 
@@ -118,6 +119,8 @@ Built-in protections enabled by default:
 * 106k+ blocked domains
 * Cosmetic filtering
 * Popup/interstitial blocking
+* Aggressive overlay cleanup
+* Sticky ad suppression
 * WebRTC leak protection
 * Tracking header stripping
 * User-Agent rotation
@@ -136,6 +139,9 @@ Zap Browser currently includes:
 * Obsidian
 * Graphite
 * Midnight
+* Neon Glass
+* Sovereign Terminal
+* Minimal Dark
 
 Themes can be changed instantly from Settings.
 
@@ -144,6 +150,8 @@ Themes can be changed instantly from Settings.
 ## 🔄 Built-in Update Checker
 
 The browser can detect new releases directly from GitHub and notify users when updates are available.
+
+The update system is local-only and does not send telemetry or analytics.
 
 ---
 
@@ -157,8 +165,9 @@ Because of this:
 * keys stay local
 * Nostr signing happens locally
 * no cloud sync exists
-* IPC hardening is ongoing
+* strict IPC validation is enforced on sensitive channels
 * permission systems are being expanded continuously
+* Lightning payments require explicit confirmation
 
 Current encryption:
 
@@ -235,10 +244,17 @@ Done.
 
 ## v0.3.7-beta
 
-* IPC hardening
-* Wallet confirmation UX
-* SECURITY.md
-* Better popup protections
+* Strict IPC validation hardening
+* Lightning payment confirmation flow
+* Real-time incoming sats notifications
+* Payment success popups
+* SECURITY.md policy
+* Better popup/interstitial protections
+* Improved address bar suggestions
+* Favicon support in suggestions
+* BrowserView layering fixes
+* Theme/UI polish
+* Refreshed app icon
 * README cleanup
 
 ## v0.4
