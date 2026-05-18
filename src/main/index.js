@@ -10,6 +10,7 @@ const doh    = require('./doh')
 const v4v    = require('./value4value')
 const cashu  = require('./cashu')
 const lnurl  = require('./lnurl')
+const V = require('./validate')
 
 const isDev = !app.isPackaged
 
@@ -233,6 +234,110 @@ function createMainView() {
 
   // Suppress the browser's unload dialog so closing a tab is never blocked
   view.webContents.on('will-prevent-unload', (e) => e.preventDefault())
+
+  function injectOverlayProtection() {
+    if (!DB.getPrivacy().adblock) return
+
+    view.webContents.executeJavaScript(`
+      (function() {
+        function zapKillAdSkins() {
+          const skinSelectors = [
+            'body',
+            'html',
+            '[class*="skin"]',
+            '[id*="skin"]',
+            '[class*="wallpaper"]',
+            '[id*="wallpaper"]',
+            '[class*="background"]',
+            '[id*="background"]',
+            '[class*="masthead"]',
+            '[id*="masthead"]'
+          ];
+
+          for (const sel of skinSelectors) {
+            document.querySelectorAll(sel).forEach(el => {
+              const st = window.getComputedStyle(el);
+              const bg = st.backgroundImage || '';
+
+              if (
+                bg &&
+                bg !== 'none' &&
+                /(ad|adv|ads|banner|pubblic|sponsor|campaign|autoligure|volkswagen|promo)/i.test(bg)
+              ) {
+                el.style.backgroundImage = 'none';
+                el.style.background = 'transparent';
+              }
+            });
+          }
+        }
+
+        function zapKillAggressiveOverlays() {
+          zapKillAdSkins();
+
+          const selectors = [
+            '[class*="overlay"]',
+            '[id*="overlay"]',
+            '[class*="modal"]',
+            '[id*="modal"]',
+            '[class*="popup"]',
+            '[id*="popup"]',
+            '[class*="interstitial"]',
+            '[id*="interstitial"]',
+            '[class*="advert"]',
+            '[id*="advert"]',
+            '[class*="banner"]',
+            '[id*="banner"]',
+            '[class*="adv"]',
+            '[id*="adv"]',
+            '[class*="sponsor"]',
+            '[id*="sponsor"]'
+          ];
+
+          for (const sel of selectors) {
+            document.querySelectorAll(sel).forEach(el => {
+              const st = window.getComputedStyle(el);
+              const rect = el.getBoundingClientRect();
+
+              const z = parseInt(st.zIndex || '0', 10);
+              const coversScreen =
+                (st.position === 'fixed' || st.position === 'absolute') &&
+                rect.width >= window.innerWidth * 0.45 &&
+                rect.height >= window.innerHeight * 0.25 &&
+                z >= 5;
+
+              if (coversScreen) {
+                el.remove();
+              }
+            });
+          }
+
+          document.body.style.overflow = '';
+          document.documentElement.style.overflow = '';
+        }
+
+        zapKillAggressiveOverlays();
+        setTimeout(zapKillAggressiveOverlays, 250);
+        setTimeout(zapKillAggressiveOverlays, 750);
+        setTimeout(zapKillAggressiveOverlays, 1500);
+        setTimeout(zapKillAggressiveOverlays, 3000);
+
+        if (!window.__zapOverlayObserver) {
+          window.__zapOverlayObserver = new MutationObserver(() => {
+            setTimeout(zapKillAggressiveOverlays, 50);
+          });
+
+          window.__zapOverlayObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style', 'class']
+          });
+        }
+      })();
+    `).catch(()=>{})
+  }
+
+  view.webContents.on('dom-ready', injectOverlayProtection)
 
   // Inject cosmetic ad-hiding CSS after each page load
   view.webContents.on('did-finish-load', () => {
@@ -498,18 +603,30 @@ ipcMain.handle('setup-wallet',      (_, args) => wallet.setupWallet(DB, args))
 
 // ── IPC: nostr ────────────────────────────────────────────────────────────────
 ipcMain.handle('nostr-create-profile', (_, args) => nostr.createProfile(DB, args))
-ipcMain.handle('nostr-import-nsec',    (_, args) => nostr.importNsec(DB, args))
+ipcMain.handle('nostr-import-nsec',    (_, args) => {
+  V.validateNsec(args?.nsec)
+
+  if (args?.name) {
+    V.assert(typeof args.name === 'string' && args.name.length <= 120, 'Invalid name')
+  }
+
+  return nostr.importNsec(DB, args)
+})
 ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1'))
 ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
 ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
 ipcMain.handle('nostr-list-permissions', () => DB.listNostrPermissions())
 ipcMain.handle('nostr-clear-permissions', () => DB.clearNostrPermissions())
 ipcMain.handle('nostr-remove-permission', (_, { origin, action }) => {
-  if (!origin || !action) throw new Error('Invalid permission')
+  V.validateOrigin(origin)
+  V.assert(typeof action === 'string' && action.length <= 80, 'Invalid action')
   return DB.removeNostrPermission(origin, action)
 })
 ipcMain.handle('nostr-get-relays',     () => nostr.getRelays())
-ipcMain.handle('nostr-sign-event',     (_, { event }) => nostr.signEvent(DB, event))
+ipcMain.handle('nostr-sign-event',     (_, { event }) => {
+  V.validateNostrEvent(event)
+  return nostr.signEvent(DB, event)
+})
 ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB))
 // NIP-07 aliases — same implementation, separate IPC channels for clarity
 ipcMain.handle('nostr-get-pubkey-nip07', async (ipcEvent) => {
@@ -522,6 +639,8 @@ ipcMain.handle('nostr-get-pubkey-nip07', async (ipcEvent) => {
   return nostr.getPubkey(DB)
 })
 ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
+  V.validateNostrEvent(e)
+
   const allowed = await confirmNostrPermission(ipcEvent, 'signEvent', e)
 
   if (!allowed) {
@@ -532,6 +651,19 @@ ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
 })
 ipcMain.handle('nostr-get-relays-nip07',  () => nostr.getRelays())
 ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
+  V.assert(
+    typeof pubkey === 'string' &&
+    /^[0-9a-fA-F]{64}$/.test(pubkey),
+    'Invalid pubkey'
+  )
+
+  V.assert(
+    typeof text === 'string' &&
+    text.length > 0 &&
+    text.length <= 50000,
+    'Invalid text'
+  )
+
   const allowed = await confirmNostrPermission(ipcEvent, 'nip04.encrypt', {
     pubkey,
     text,
@@ -553,6 +685,19 @@ ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
   return nip04.encrypt(privKeyHex, pubkey, text)
 })
 ipcMain.handle('nostr-nip04-decrypt', async (ipcEvent, { pubkey, text }) => {
+  V.assert(
+    typeof pubkey === 'string' &&
+    /^[0-9a-fA-F]{64}$/.test(pubkey),
+    'Invalid pubkey'
+  )
+
+  V.assert(
+    typeof text === 'string' &&
+    text.length > 0 &&
+    text.length <= 50000,
+    'Invalid text'
+  )
+
   const allowed = await confirmNostrPermission(ipcEvent, 'nip04.decrypt', {
     pubkey,
     text,
@@ -583,16 +728,42 @@ ipcMain.handle('lnurl-fetch-pay-params', (_, { address }) => {
 })
 
 ipcMain.handle('lnurl-request-invoice', (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid LNURL request')
+  V.assert(typeof args.callback === 'string' && args.callback.length <= 3000, 'Invalid callback')
+  V.assert(Number.isSafeInteger(args.amountMsat) && args.amountMsat > 0, 'Invalid amount')
+  if (args.comment != null) {
+    V.assert(typeof args.comment === 'string' && args.comment.length <= 1000, 'Invalid comment')
+  }
   return lnurl.requestInvoice(args)
 })
 // ── IPC: NWC lightning ────────────────────────────────────────────────────────
-ipcMain.handle('nwc-connect',     (_, args)      => nwc.connect(DB, args))
+ipcMain.handle('nwc-connect',     (_, args)      => {
+  V.assert(args && typeof args === 'object', 'Invalid NWC payload')
+  V.assert(typeof args.nwcUri === 'string' && args.nwcUri.startsWith('nostr+walletconnect://') && args.nwcUri.length <= 5000, 'Invalid NWC URI')
+  if (args.name != null) {
+    V.assert(typeof args.name === 'string' && args.name.length <= 120, 'Invalid connection name')
+  }
+  return nwc.connect(DB, args)
+})
 ipcMain.handle('nwc-disconnect',  ()              => nwc.disconnect(DB))
 ipcMain.handle('nwc-is-connected',()              => nwc.isConnected(DB))
 ipcMain.handle('nwc-get-balance', ()              => nwc.getBalance(DB))
-ipcMain.handle('nwc-pay-invoice', (_, { invoice }) => nwc.payInvoice(DB, invoice))
-ipcMain.handle('nwc-make-invoice',(_, args)      => nwc.makeInvoice(DB, args))
-ipcMain.handle('decode-invoice',  (_, { bolt11 }) => nwc.decodeInvoice(bolt11))
+ipcMain.handle('nwc-pay-invoice', (_, { invoice }) => {
+  V.validateInvoice(invoice)
+  return nwc.payInvoice(DB, invoice)
+})
+ipcMain.handle('nwc-make-invoice',(_, args)      => {
+  V.assert(args && typeof args === 'object', 'Invalid invoice payload')
+  V.assert(Number.isSafeInteger(args.amountMsat) && args.amountMsat > 0, 'Invalid amount')
+  if (args.description != null) {
+    V.assert(typeof args.description === 'string' && args.description.length <= 1000, 'Invalid description')
+  }
+  return nwc.makeInvoice(DB, args)
+})
+ipcMain.handle('decode-invoice',  (_, { bolt11 }) => {
+  V.validateInvoice(bolt11)
+  return nwc.decodeInvoice(bolt11)
+})
 
 // ── IPC: favorites ────────────────────────────────────────────────────────────
 ipcMain.handle('get-favorites',   () => DB.getFavorites())

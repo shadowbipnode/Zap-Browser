@@ -59,6 +59,7 @@ function NWCTab() {
     catch(e:any){show(String(e),'err')}
     setLoading(false)
   }
+
   const isLightningAddress=(v:string)=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim())
 
   const pay=async()=>{
@@ -77,16 +78,41 @@ function NWCTab() {
           throw new Error(`${L('Importo fuori range','Amount out of range')}. Min ${Math.ceil(params.minSendable/1000)} sats, max ${Math.floor(params.maxSendable/1000)} sats`)
         }
 
+        const commentAllowed = Number(params.commentAllowed || 0)
+        const cleanComment = sendComment.trim()
+
         const inv=await zap()?.lnurlRequestInvoice({
           callback:params.callback,
           amountMsat,
-          comment:sendComment.trim()||undefined
+          comment:commentAllowed > 0 && cleanComment
+            ? cleanComment.slice(0, commentAllowed)
+            : undefined
         })
 
-        await zap()?.nwcPayInvoice({invoice:inv.invoice})
+        const payResult = await zap()?.nwcPayInvoice({invoice:inv.invoice})
+
+        window.dispatchEvent(new CustomEvent('zap-payment-success', {
+          detail: {
+            amount: sats,
+            preimage: payResult?.preimage || null,
+          }
+        }))
       }else{
-        await zap()?.nwcPayInvoice({invoice:target})
+        const decoded = await zap()?.decodeInvoice?.({ bolt11: target })
+        const payResult = await zap()?.nwcPayInvoice({invoice:target})
+
+        window.dispatchEvent(new CustomEvent('zap-payment-success', {
+          detail: {
+            amount: decoded?.amountMsat
+              ? Math.floor(decoded.amountMsat / 1000)
+              : null,
+            preimage: payResult?.preimage || null,
+          }
+        }))
       }
+
+      const br = await zap()?.nwcGetBalance?.()
+      if (br?.balance != null) setBalance(br.balance)
 
       show(L('Pagato! ⚡','Paid! ⚡'))
       setInvoice('')
@@ -97,6 +123,7 @@ function NWCTab() {
     catch(e:any){show(String(e?.message||e),'err')}
     setLoading(false)
   }
+
   const mkInv=async()=>{
     setLoading(true);setMsg('')
     try{ const r=await zap()?.nwcMakeInvoice({amountMsat:parseInt(amount)*1000,description:desc}); setGenInv(r?.invoice||'') }

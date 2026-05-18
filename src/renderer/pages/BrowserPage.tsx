@@ -38,6 +38,7 @@ export default function BrowserPage() {
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [showUpdatePopup, setShowUpdatePopup] = useState(false)
   const [popupBlocked, setPopupBlocked] = useState<any>(null)
+  const [paymentSuccess, setPaymentSuccess] = useState<any>(null)
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
 
@@ -86,6 +87,13 @@ export default function BrowserPage() {
       setTimeout(() => setPopupBlocked(null), 4500)
     })
 
+    const onPaymentSuccess = (e: any) => {
+      setPaymentSuccess((e as CustomEvent).detail || {})
+      setTimeout(() => setPaymentSuccess(null), 7000)
+    }
+
+    window.addEventListener('zap-payment-success', onPaymentSuccess)
+
     // Navigate from history/bookmarks
     const onNavigateTo = (e: any) => {
       handleNavigate((e as CustomEvent).detail)
@@ -100,6 +108,7 @@ export default function BrowserPage() {
     return () => {
       window.removeEventListener('navigate-to', onNavigateTo)
       window.removeEventListener('toggle-favbar', onToggleFavBar)
+      window.removeEventListener('zap-payment-success', onPaymentSuccess)
     }
   }, [activeId])
 
@@ -607,6 +616,38 @@ export default function BrowserPage() {
               {L('Chiudi','Close')}
             </button>
           </div>
+        </div>
+      )}
+
+      {paymentSuccess && (
+        <div style={{
+          position:'fixed',
+          bottom:90,
+          right:24,
+          zIndex:999999,
+          width:280,
+          padding:14,
+          background:'var(--bg-1)',
+          border:'1px solid var(--green)',
+          borderRadius:'var(--r-md)',
+          boxShadow:'0 18px 50px rgba(0,0,0,.55)',
+          fontFamily:'var(--ff)',
+        }}>
+          <div style={{fontSize:13,fontWeight:900,color:'var(--green)',marginBottom:6}}>
+            ⚡ Payment sent
+          </div>
+
+          {paymentSuccess.amount && (
+            <div style={{fontSize:22,fontWeight:900,color:'var(--t0)',marginBottom:8}}>
+              {paymentSuccess.amount.toLocaleString()} sats
+            </div>
+          )}
+
+          {paymentSuccess.preimage && (
+            <div style={{fontSize:11,color:'var(--t2)',wordBreak:'break-all',lineHeight:1.4}}>
+              preimage: {paymentSuccess.preimage.slice(0,24)}...
+            </div>
+          )}
         </div>
       )}
 
