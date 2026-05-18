@@ -39,6 +39,7 @@ export default function BrowserPage() {
   const [showUpdatePopup, setShowUpdatePopup] = useState(false)
   const [popupBlocked, setPopupBlocked] = useState<any>(null)
   const [paymentSuccess, setPaymentSuccess] = useState<any>(null)
+  const [incomingPayment, setIncomingPayment] = useState<any>(null)
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
 
@@ -94,6 +95,40 @@ export default function BrowserPage() {
 
     window.addEventListener('zap-payment-success', onPaymentSuccess)
 
+
+    let lastKnownBalance: number | null = null
+    let balanceWatcherTimer: ReturnType<typeof setInterval> | null = null
+
+    const checkBalanceForIncoming = async () => {
+      try {
+        const connected = await window.zap?.nwcIsConnected?.()
+        if (!connected) return
+
+        const r = await window.zap?.nwcGetBalance?.()
+        const newBalance = r?.balance || 0
+
+        if (lastKnownBalance === null) {
+          lastKnownBalance = newBalance
+          return
+        }
+
+        if (newBalance > lastKnownBalance) {
+          const received = newBalance - lastKnownBalance
+
+          setIncomingPayment({ amount: received })
+
+          setTimeout(() => {
+            setIncomingPayment(null)
+          }, 7000)
+        }
+
+        lastKnownBalance = newBalance
+      } catch (_) {}
+    }
+
+    checkBalanceForIncoming()
+    balanceWatcherTimer = setInterval(checkBalanceForIncoming, 10000)
+
     // Navigate from history/bookmarks
     const onNavigateTo = (e: any) => {
       handleNavigate((e as CustomEvent).detail)
@@ -106,6 +141,7 @@ export default function BrowserPage() {
     window.addEventListener('toggle-favbar', onToggleFavBar)
 
     return () => {
+      if (balanceWatcherTimer) clearInterval(balanceWatcherTimer)
       window.removeEventListener('navigate-to', onNavigateTo)
       window.removeEventListener('toggle-favbar', onToggleFavBar)
       window.removeEventListener('zap-payment-success', onPaymentSuccess)
@@ -615,6 +651,40 @@ export default function BrowserPage() {
             >
               {L('Chiudi','Close')}
             </button>
+          </div>
+        </div>
+      )}
+
+      {incomingPayment && (
+        <div style={{
+          position:'fixed',
+          bottom:180,
+          right:24,
+          zIndex:999999,
+          width:280,
+          padding:14,
+          background:'var(--bg-1)',
+          border:'1px solid var(--blue)',
+          borderRadius:'var(--r-md)',
+          boxShadow:'0 18px 50px rgba(0,0,0,.55)',
+          fontFamily:'var(--ff)',
+        }}>
+          <div style={{
+            fontSize:13,
+            fontWeight:900,
+            color:'var(--blue)',
+            marginBottom:6,
+          }}>
+            ⚡ Payment received
+          </div>
+
+          <div style={{
+            fontSize:22,
+            fontWeight:900,
+            color:'var(--t0)',
+            marginBottom:4,
+          }}>
+            +{incomingPayment.amount.toLocaleString()} sats
           </div>
         </div>
       )}
