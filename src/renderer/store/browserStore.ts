@@ -22,7 +22,7 @@ const firstTab = makeTab('zap://newtab')
 interface Store {
   tabs: Tab[]
   activeId: string
-  addTab: (url?: string) => void
+  addTab: (url?: string, id?: string) => void
   closeTab: (id: string) => void
   setActive: (id: string) => void
   updateTab: (id: string, p: Partial<Tab>) => void
@@ -33,8 +33,8 @@ export const useBrowser = create<Store>((set, get) => ({
   tabs: [firstTab],
   activeId: firstTab.id,
 
-  addTab: (url) => {
-    const t = makeTab(url)
+  addTab: (url, id) => {
+    const t = makeTab(url, id)
     set(s => ({ tabs: [...s.tabs, t], activeId: t.id }))
   },
 

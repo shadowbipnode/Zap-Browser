@@ -71,10 +71,20 @@ export default function BrowserPage() {
   // Listen to events from main process
   useEffect(() => {
     window.zap?.on('tab-updated', (data: any) => {
+      let favicon = undefined
+      try {
+        if (data.url?.startsWith('http')) {
+          favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(data.url).hostname)}&sz=32`
+        }
+      } catch (_) {}
+
       updateTab(data.tabId, {
-        title: data.title, url: data.url,
+        title: data.title,
+        url: data.url,
+        favicon,
         loading: data.loading,
-        canGoBack: data.canGoBack, canGoForward: data.canGoForward,
+        canGoBack: data.canGoBack,
+        canGoForward: data.canGoForward,
       })
       if (data.tabId === activeId && data.url) setAddrVal(data.url)
     })
@@ -196,7 +206,9 @@ export default function BrowserPage() {
     setAddrVal(url || '')
     // Crea tab nel main e poi forza switch
     window.zap?.tabCreate({ tabId: id }).then(() => {
-      window.zap?.tabSwitch({ tabId: id })
+      setTimeout(() => {
+        window.zap?.tabSwitch({ tabId: id })
+      }, 30)
       if (url && url !== 'zap://newtab') {
         setTimeout(() => window.zap?.tabNavigate({ tabId: id, url }), 100)
       }
@@ -382,7 +394,11 @@ export default function BrowserPage() {
         {tabs.map(t => (
           <div key={t.id} className={`tab ${t.id === activeId ? 'active' : ''}`}
             onClick={() => handleSwitchTab(t.id)}>
-            <span className="tab-icon">🌐</span>
+            <span className="tab-icon">
+              {t.favicon ? (
+                <img src={t.favicon} alt="" style={{width:14,height:14,borderRadius:3}} />
+              ) : '🌐'}
+            </span>
             <span className="tab-label">{t.loading ? L('Caricamento...','Loading...') : t.title || L('Nuova Scheda','New Tab')}</span>
             <button className="tab-x" onClick={e => { e.stopPropagation(); handleCloseTab(t.id) }}>×</button>
           </div>
@@ -564,7 +580,15 @@ export default function BrowserPage() {
             WebkitAppRegion:'no-drag' as any, height:28, position:'relative',
           }}>
             {visible.map((f: any) => (
-              <button key={f.id} onClick={() => handleNavigate(f.url)}
+              <button
+                key={f.id}
+                onClick={() => handleNavigate(f.url)}
+                onMouseDown={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault()
+                    handleNewTab(f.url)
+                  }
+                }}
                 title={f.url}
                 style={{
                   background:'none', border:'none', cursor:'pointer',
@@ -598,8 +622,16 @@ export default function BrowserPage() {
                     minWidth:220, maxHeight:300, overflowY:'auto',
                   }}>
                     {hidden.map((f: any) => (
-                      <button key={f.id}
+                      <button
+                        key={f.id}
                         onClick={() => { handleNavigate(f.url); setFavDropOpen(false) }}
+                        onMouseDown={(e) => {
+                          if (e.button === 1) {
+                            e.preventDefault()
+                            handleNewTab(f.url)
+                            setFavDropOpen(false)
+                          }
+                        }}
                         style={{
                           display:'block', width:'100%', textAlign:'left',
                           background:'none', border:'none', cursor:'pointer',
@@ -690,7 +722,7 @@ export default function BrowserPage() {
           <div className="side-panel">
             {panel === 'wallet'    && <WalletPanel    onClose={() => setPanel(null)} />}
             {panel === 'nostr'     && <NostrPanel     onClose={() => setPanel(null)} />}
-            {panel === 'favorites' && <FavoritesPanel onClose={() => setPanel(null)} onNavigate={handleNavigate} currentUrl={activeTab?.url||''} currentTitle={activeTab?.title||''} />}
+            {panel === 'favorites' && <FavoritesPanel onClose={() => setPanel(null)} onNavigate={handleNavigate} onOpenNewTab={handleNewTab} currentUrl={activeTab?.url||''} currentTitle={activeTab?.title||''} />}
             {panel === 'settings'  && <SettingsPanel  onClose={() => setPanel(null)} />}
           </div>
         )}

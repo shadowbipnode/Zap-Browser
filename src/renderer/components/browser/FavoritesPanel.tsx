@@ -4,11 +4,12 @@ interface Fav { id:number; title:string; url:string; favicon?:string }
 interface Props {
   onClose:()=>void
   onNavigate:(url:string)=>void
+  onOpenNewTab?:(url:string)=>void
   currentUrl:string
   currentTitle:string
 }
 
-export default function FavoritesPanel({ onClose, onNavigate, currentUrl, currentTitle }: Props) {
+export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, currentUrl, currentTitle }: Props) {
   const [favs,  setFavs]  = useState<Fav[]>([])
   const [title, setTitle] = useState('')
   const [url,   setUrl]   = useState('')
@@ -123,7 +124,11 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
             </p>
           : favs.map(f => (
             <div key={f.id} className="fav-item"
-              onClick={() => { onNavigate(f.url); onClose() }}>
+              onClick={() => {
+                if (onOpenNewTab) onOpenNewTab(f.url)
+                else onNavigate(f.url)
+                onClose()
+              }}>
               <span className="fav-ico">🌐</span>
               <div className="fav-info">
                 <div className="fav-title">{f.title}</div>
