@@ -88,37 +88,43 @@ jobs:
 
       - name: Create release notes
         run: |
-          cat > RELEASE_NOTES.md <<'NOTES'
-          ## Zap Browser v0.3.6-beta
+          cat > RELEASE_NOTES.md <<NOTES
+          # ⚡ Zap Browser ${{ github.ref_name }}
 
-          UX, privacy and release-infrastructure update.
+          Automated cross-platform beta release.
 
-          ### Added
-          - Built-in update checker
-          - Version badge in the main browser UI
-          - Startup notification when a new release is available
-          - Theme engine with multiple selectable themes
-          - Session-only NIP-07 permissions
-          - Clear all NIP-07 permissions action
-          - Improved popup, popunder and overlay blocking
-          - Basic aggressive ad skin cleanup
+          ## Highlights
 
-          ### Improved
-          - English is now the default language
-          - Language switching is reactive across key UI areas
-          - Settings/About version display
-          - GitHub Actions release automation
-          - Linux and Windows release packaging
+          - Lightning payment confirmation before sending sats
+          - Payment sent confirmation popup with amount and preimage preview
+          - Real-time incoming sats notifications while browsing
+          - Strict IPC validation hardening across sensitive channels
+          - SECURITY.md responsible disclosure policy
+          - Improved address bar suggestions with favicon support
+          - Better BrowserView layering for dropdowns and browser UI
+          - Refreshed app icon and packaging assets
+          - Improved popup/interstitial blocking behavior
+          - Theme polish and UI refinements
 
-          ### Builds
+          ## Security
+
+          - Hardened IPC payload validation
+          - Improved Nostr/NWC/LNURL/Cashu input checks
+          - Safer Lightning payment flow with explicit user confirmation
+
+          ## Builds
+
           - Linux AppImage
           - Debian package
           - RPM package
           - Windows NSIS installer
-          - Windows portable/zip builds
+          - Windows portable ZIP build
 
-          ### Notes
+          ## Notes
+
           This is still beta software intended for testing and feedback.
+
+          Do not store large funds inside the browser yet.
 
           Windows builds are experimental.
           NOTES
@@ -126,7 +132,7 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: Zap Browser ${{ github.ref_name }} — Themes, Updates & Privacy Hardening
+          name: Zap Browser ${{ github.ref_name }} — Security, Lightning UX & Browser Polish
           body_path: RELEASE_NOTES.md
           files: |
             release-artifacts/**/*.AppImage
