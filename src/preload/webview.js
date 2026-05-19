@@ -21,6 +21,37 @@ contextBridge.exposeInMainWorld('__zapOpenNewTab', (url) => {
   ipcRenderer.invoke('open-in-new-tab', { url })
 })
 
+// Global middle-click support inside web pages.
+// Opens normal links in a new Zap Browser foreground tab.
+// Strong dedupe prevents duplicate tab creation from complex news sites.
+window.addEventListener('auxclick', (event) => {
+  if (event.button !== 1) return
+
+  const target = event.target
+  const link = target?.closest?.('a[href]')
+  if (!link) return
+
+  const href = link.href
+  if (!href || href.startsWith('javascript:') || href.startsWith('#')) return
+
+  const now = Date.now()
+  if (window.__zapLastAuxUrl === href && now - (window.__zapLastAuxAt || 0) < 1200) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+    return
+  }
+
+  window.__zapLastAuxUrl = href
+  window.__zapLastAuxAt = now
+
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+
+  ipcRenderer.invoke('open-in-new-tab', { url: href })
+}, true)
+
 // Expose window.nostr (NIP-07) so Nostr web apps can request signatures
 // without ever seeing the private key.
 contextBridge.exposeInMainWorld('nostr', {

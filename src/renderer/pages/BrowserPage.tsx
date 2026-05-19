@@ -90,6 +90,16 @@ export default function BrowserPage() {
     })
     window.zap?.on('blocked-count', (n: number) => setBlocked(n))
     window.zap?.on('open-new-tab', ({ url }: any) => {
+      const now = Date.now()
+      const w = window as any
+
+      if (url === w.__zapLastOpenNewTabUrl && now - (w.__zapLastOpenNewTabAt || 0) < 1200) {
+        return
+      }
+
+      w.__zapLastOpenNewTabUrl = url
+      w.__zapLastOpenNewTabAt = now
+
       handleNewTab(url)
     })
     window.zap?.on('payment-detected', (data: any) => setPayment(data))
@@ -201,16 +211,29 @@ export default function BrowserPage() {
   // Create a new tab
   const handleNewTab = useCallback((url?: string) => {
     const id = crypto.randomUUID()
-    addTab(url || 'zap://newtab', id)
+    const target = url || 'zap://newtab'
+
+    addTab(target, id)
     setActive(id)
     setAddrVal(url || '')
-    // Crea tab nel main e poi forza switch
+    setShowSuggest(false)
+
+    if (url && url !== 'zap://newtab') {
+      updateTab(id, {
+        url,
+        title: L('Caricamento...','Loading...'),
+        loading: true,
+      })
+    }
+
     window.zap?.tabCreate({ tabId: id }).then(() => {
-      setTimeout(() => {
-        window.zap?.tabSwitch({ tabId: id })
-      }, 30)
       if (url && url !== 'zap://newtab') {
-        setTimeout(() => window.zap?.tabNavigate({ tabId: id, url }), 100)
+        window.zap?.tabNavigate({ tabId: id, url })
+      } else {
+        window.zap?.tabHome({ tabId: id })
+        setTimeout(() => {
+          document.querySelector<HTMLInputElement>('.addr-input')?.focus()
+        }, 50)
       }
     })
   }, [addTab, setActive])
