@@ -107,6 +107,11 @@ function init() {
     );
     INSERT OR IGNORE INTO privacy_settings (id) VALUES (1);
   `)
+
+  try { db.prepare('ALTER TABLE favorites ADD COLUMN parent_id INTEGER').run() } catch (_) {}
+  try { db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+  try { db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+
 migrateNwcConnectionsSchema()
 migratePrivacySettingsSchema()
 }
@@ -160,13 +165,34 @@ function setPrivacy(key, value) {
 
 // ── Favorites ─────────────────────────────────────────────────────────────────
 function getFavorites() {
-  return db.prepare('SELECT * FROM favorites ORDER BY created_at DESC').all()
+  return db.prepare(`
+    SELECT *
+    FROM favorites
+    ORDER BY
+      COALESCE(parent_id, 0),
+      is_folder DESC,
+      sort_order ASC,
+      created_at DESC
+  `).all()
 }
-function addFavorite({ title, url, favicon }) {
+function addFavorite({ title, url, favicon, parent_id = null, is_folder = 0, sort_order = 0 }) {
+  const ts = now()
+  const safeUrl = is_folder ? '' : url
+
   const r = db
-    .prepare('INSERT INTO favorites(title,url,favicon,created_at) VALUES(?,?,?,?)')
-    .run(title, url, favicon || null, now())
-  return { id: r.lastInsertRowid, title, url, favicon, created_at: now() }
+    .prepare('INSERT INTO favorites(title,url,favicon,parent_id,is_folder,sort_order,created_at) VALUES(?,?,?,?,?,?,?)')
+    .run(title, safeUrl, favicon || null, parent_id, is_folder ? 1 : 0, sort_order || 0, ts)
+
+  return {
+    id: r.lastInsertRowid,
+    title,
+    url: safeUrl,
+    favicon: favicon || null,
+    parent_id,
+    is_folder: is_folder ? 1 : 0,
+    sort_order: sort_order || 0,
+    created_at: ts,
+  }
 }
 function removeFavorite(id) {
   db.prepare('DELETE FROM favorites WHERE id=?').run(id)

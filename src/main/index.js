@@ -1099,21 +1099,59 @@ ipcMain.handle('remove-favorite', (_, { id }) => {
   return DB.removeFavorite(id)
 })
 ipcMain.handle('import-favorites-html', (_, { html }) => {
+  V.assert(typeof html === 'string' && html.length <= 10_000_000, 'Invalid bookmarks HTML')
+
   const results = []
-  const linkRe  = /<A[^>]+HREF="([^"]+)"[^>]*>([^<]+)<\/A>/gi
+  const stack = [null]
+  let sortOrder = 0
+
+  const tokenRe = /<DT>\s*<H3[^>]*>(.*?)<\/H3>|<DL><p>|<\/DL><p>|<DT>\s*<A[^>]+HREF="([^"]+)"[^>]*>(.*?)<\/A>/gis
+
   let match
-  while ((match = linkRe.exec(html)) !== null) {
-    const url   = match[1].trim()
-    const title = match[2].trim()
-    if (url.startsWith('http') && title) {
+  while ((match = tokenRe.exec(html)) !== null) {
+    const folderTitle = match[1]?.replace(/<[^>]+>/g, '').trim()
+    const url = match[2]?.trim()
+    const title = match[3]?.replace(/<[^>]+>/g, '').trim()
+
+    if (folderTitle) {
       try {
-        DB._db()
-          .prepare('INSERT OR IGNORE INTO favorites(url,title,favicon,created_at) VALUES(?,?,NULL,?)')
-          .run(url, title, Math.floor(Date.now() / 1000))
-        results.push({ url, title })
+        const parentId = stack[stack.length - 1]
+        const folder = DB.addFavorite({
+          title: folderTitle,
+          url: '',
+          favicon: null,
+          parent_id: parentId,
+          is_folder: 1,
+          sort_order: sortOrder++,
+        })
+
+        stack.push(folder.id)
+        results.push({ type: 'folder', title: folderTitle })
+      } catch (_) {}
+      continue
+    }
+
+    if (match[0].toUpperCase().startsWith('</DL')) {
+      if (stack.length > 1) stack.pop()
+      continue
+    }
+
+    if (url && title && /^https?:\/\//i.test(url)) {
+      try {
+        DB.addFavorite({
+          title,
+          url,
+          favicon: null,
+          parent_id: stack[stack.length - 1],
+          is_folder: 0,
+          sort_order: sortOrder++,
+        })
+
+        results.push({ type: 'bookmark', url, title })
       } catch (_) {}
     }
   }
+
   return results
 })
 

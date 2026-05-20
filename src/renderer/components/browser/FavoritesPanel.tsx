@@ -65,6 +65,58 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     await (window as any).zap?.removeFavorite({ id }); load()
   }
 
+  const buildTree = (items: Fav[]) => {
+    const byParent: Record<string, Fav[]> = {}
+
+    items.forEach((f: any) => {
+      const key = String(f.parent_id ?? 'root')
+      if (!byParent[key]) byParent[key] = []
+      byParent[key].push(f)
+    })
+
+    const renderItems = (parentId: any, depth = 0): any[] => {
+      const key = String(parentId ?? 'root')
+      return (byParent[key] || []).flatMap((f: any) => {
+        const isFolder = Number(f.is_folder) === 1
+
+        if (isFolder) {
+          return [
+            <div key={`folder-${f.id}`} className="fav-item" style={{ paddingLeft: 16 + depth * 14 }}>
+              <span className="fav-ico">📁</span>
+              <div className="fav-info">
+                <div className="fav-title">{f.title}</div>
+                <div className="fav-url">Folder</div>
+              </div>
+              <button className="fav-rm"
+                onClick={e => { e.stopPropagation(); remove(f.id) }}>×</button>
+            </div>,
+            ...renderItems(f.id, depth + 1)
+          ]
+        }
+
+        return [
+          <div key={f.id} className="fav-item"
+            style={{ paddingLeft: 16 + depth * 14 }}
+            onClick={() => {
+              if (onOpenNewTab) onOpenNewTab(f.url)
+              else onNavigate(f.url)
+              onClose()
+            }}>
+            <span className="fav-ico">🌐</span>
+            <div className="fav-info">
+              <div className="fav-title">{f.title}</div>
+              <div className="fav-url">{f.url}</div>
+            </div>
+            <button className="fav-rm"
+              onClick={e => { e.stopPropagation(); remove(f.id) }}>×</button>
+          </div>
+        ]
+      })
+    }
+
+    return renderItems(null)
+  }
+
   return (
     <>
       <div className="panel-hd">
@@ -122,22 +174,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
           ? <p style={{fontSize:12,color:'var(--t2)',textAlign:'center',padding:'24px 0'}}>
               Nessun preferito ancora.
             </p>
-          : favs.map(f => (
-            <div key={f.id} className="fav-item"
-              onClick={() => {
-                if (onOpenNewTab) onOpenNewTab(f.url)
-                else onNavigate(f.url)
-                onClose()
-              }}>
-              <span className="fav-ico">🌐</span>
-              <div className="fav-info">
-                <div className="fav-title">{f.title}</div>
-                <div className="fav-url">{f.url}</div>
-              </div>
-              <button className="fav-rm"
-                onClick={e => { e.stopPropagation(); remove(f.id) }}>×</button>
-            </div>
-          ))
+          : buildTree(favs)
         }
       </div>
     </>
