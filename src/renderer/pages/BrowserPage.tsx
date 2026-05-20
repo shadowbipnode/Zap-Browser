@@ -34,6 +34,7 @@ export default function BrowserPage() {
   const [paying, setPaying]       = useState(false)
   const [suggestions, setSuggestions] = useState<any[]>([])
   const [showSuggest, setShowSuggest] = useState(false)
+  const [selectedSuggest, setSelectedSuggest] = useState(-1)
   const [appVersion, setAppVersion] = useState('')
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [showUpdatePopup, setShowUpdatePopup] = useState(false)
@@ -290,25 +291,63 @@ export default function BrowserPage() {
       }
       setSuggestions(found)
       setShowSuggest(found.length > 0)
+      setSelectedSuggest(found.length > 0 ? 0 : -1)
     } catch(e) { console.error('[history] errore:', e) }
   }
 
   const handleAddrKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') { setShowSuggest(false); return }
+    if (e.key === 'Escape') {
+      setShowSuggest(false)
+      setSelectedSuggest(-1)
+      return
+    }
+
+    if (showSuggest && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSelectedSuggest(v => v < suggestions.length - 1 ? v + 1 : 0)
+        return
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSelectedSuggest(v => v > 0 ? v - 1 : suggestions.length - 1)
+        return
+      }
+
+      if (e.key === 'Enter' && selectedSuggest >= 0) {
+        e.preventDefault()
+        const item = suggestions[selectedSuggest]
+        if (item?.url) {
+          setAddrVal(item.url)
+          setShowSuggest(false)
+          setSelectedSuggest(-1)
+          handleNavigate(item.url)
+          return
+        }
+      }
+    }
+
     if (e.key !== 'Enter') return
+
     setShowSuggest(false)
+    setSelectedSuggest(-1)
+
     const v = addrVal.trim()
-    // Detect Lightning invoice or Cashu token
+
     if (v.toLowerCase().startsWith('lnbc') || v.toLowerCase().startsWith('lntb')) {
       setPayment({ type: 'invoice', value: v })
       return
     }
+
     if (v.toLowerCase().startsWith('cashua')) {
       setPayment({ type: 'cashu', value: v })
       return
     }
+
     handleNavigate(v)
   }
+
 
   const handlePay = async () => {
     if (!payment) return
@@ -719,10 +758,10 @@ export default function BrowserPage() {
                 padding:'10px 16px',
                 cursor:'pointer',
                 borderBottom:'1px solid var(--b0)',
+                background: selectedSuggest === i ? 'var(--bg-3)' : '',
               }}
-                onMouseEnter={e=>(e.currentTarget.style.background='var(--bg-3)')}
-                onMouseLeave={e=>(e.currentTarget.style.background='')}
-                onClick={()=>{ setShowSuggest(false); setAddrVal(s.url); handleNavigate(s.url) }}
+                onMouseEnter={() => setSelectedSuggest(i)}
+                onClick={()=>{ setShowSuggest(false); setSelectedSuggest(-1); setAddrVal(s.url); handleNavigate(s.url) }}
               >
                 <img
                   src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(s.url)}&sz=32`}
