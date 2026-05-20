@@ -26,6 +26,7 @@ export default function BrowserPage() {
   const [favBar,      setFavBar]    = useState<any[]>([])
   const [showFavBar,  setShowFavBar] = useState(() => localStorage.getItem('showFavBar') !== 'false')
   const [favDropOpen, setFavDropOpen] = useState(false)
+  const [favBarMax, setFavBarMax] = useState(10)
   const [currentUA, setCurrentUA] = useState('')
   const [payment, setPayment]   = useState<any>(null)
   const [pageNostr, setPageNostr] = useState(false)
@@ -58,6 +59,21 @@ export default function BrowserPage() {
     })
     window.zap?.getBlockedCount().then(setBlocked)
     return () => window.removeEventListener('favorites-updated', loadFavBar)
+  }, [])
+
+  // Dynamic bookmarks bar capacity
+  useEffect(() => {
+    const calc = () => {
+      const w = window.innerWidth || 1200
+      const reserved = 420
+      const avgItem = 125
+      const max = Math.max(4, Math.floor((w - reserved) / avgItem))
+      setFavBarMax(max)
+    }
+
+    calc()
+    window.addEventListener('resize', calc)
+    return () => window.removeEventListener('resize', calc)
   }, [])
 
   // Load app version / update status
@@ -639,9 +655,13 @@ export default function BrowserPage() {
 
       {/* ── Bookmarks bar ────────────────────────────────────────── */}
       {showFavBar && favBar.length > 0 && (() => {
-        const MAX = 10
-        const visible = favBar.slice(0, MAX)
-        const hidden  = favBar.slice(MAX)
+        const rootFavs = favBar.filter((f:any) =>
+          !f.parent_id &&
+          String(f.title || '').toLowerCase() !== 'bookmarks bar' &&
+          String(f.title || '').toLowerCase() !== 'barra dei preferiti'
+        )
+        const visible = rootFavs.slice(0, favBarMax)
+        const hidden  = rootFavs.slice(favBarMax)
         return (
           <div style={{
             display:'flex', alignItems:'center', gap:2,
@@ -652,7 +672,10 @@ export default function BrowserPage() {
             {visible.map((f: any) => (
               <button
                 key={f.id}
-                onClick={() => handleNavigate(f.url)}
+                onClick={() => {
+                  if (Number(f.is_folder) === 1) return
+                  handleNavigate(f.url)
+                }}
                 onMouseDown={(e) => {
                   if (e.button === 1) {
                     e.preventDefault()
@@ -669,7 +692,7 @@ export default function BrowserPage() {
                 onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
                 onMouseLeave={e => (e.currentTarget.style.background='none')}
               >
-                🌐 {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
+                {Number(f.is_folder) === 1 ? '📁' : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
               </button>
             ))}
             {hidden.length > 0 && (
@@ -683,7 +706,7 @@ export default function BrowserPage() {
                   }}
                   onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
                   onMouseLeave={e => (e.currentTarget.style.background='none')}
-                >» {hidden.length}</button>
+                >»</button>
                 {favDropOpen && (
                   <div style={{
                     position:'absolute', top:24, right:0, zIndex:9999,
