@@ -374,10 +374,16 @@ function createMainView() {
         }
 
         function zapKillAggressiveOverlays() {
-          if (zapHasPaywallFramework()) return;
+          const hasPaywall = zapHasPaywallFramework();
 
           zapKillAdSkins();
           zapKillAdElements();
+
+          if (hasPaywall) {
+            document.body.style.overflow = '';
+            document.documentElement.style.overflow = '';
+            return;
+          }
 
           const selectors = [
             '[class*="overlay"]',
