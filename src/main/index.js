@@ -307,7 +307,74 @@ function createMainView() {
           });
         }
 
+        function zapHasPaywallFramework() {
+          const html = document.documentElement.innerHTML.slice(0, 500000);
+
+          return /tinypass|piano|tp-backdrop|tp-active|paywall|subscription|abbonati|abbonamento/i.test(html);
+        }
+
+        function zapLooksLikePaywall(el) {
+          const txt = String(el.innerText || '').toLowerCase()
+          const html = String(el.outerHTML || '').toLowerCase()
+
+          return /tinypass|piano|tp-backdrop|tp-active|paywall|subscription|subscribe|abbonati|abbonamento|accedi|login/.test(html + ' ' + txt)
+        }
+
+        function zapLooksLikeAdOverlay(el) {
+          const txt = String(el.innerText || '').toLowerCase()
+          const html = String(el.outerHTML || '').toLowerCase()
+
+          if (zapLooksLikePaywall(el)) return false
+
+          return /pubblicit|advert|advertising|sponsor|sponsored|promo|coupon|offerta|limited|scopri di più|scopri come|buono|sconto|banner|adv|adsbygoogle|googlesyndication|doubleclick|amazon|coop|ipercoop|auto|bmw|volkswagen/.test(html + ' ' + txt)
+        }
+
+        function zapKillAdOverlays() {
+          document.querySelectorAll('body *').forEach(el => {
+            const st = window.getComputedStyle(el)
+            const r = el.getBoundingClientRect()
+
+            if (r.width < 120 || r.height < 50) return
+            if (!zapLooksLikeAdOverlay(el)) return
+
+            const z = parseInt(st.zIndex || '0', 10)
+
+            const isFixedOrSticky =
+              st.position === 'fixed' ||
+              st.position === 'sticky'
+
+            const isBigOverlay =
+              r.width >= window.innerWidth * 0.45 &&
+              r.height >= window.innerHeight * 0.18 &&
+              z >= 10
+
+            const isBottomBanner =
+              isFixedOrSticky &&
+              r.width >= window.innerWidth * 0.45 &&
+              r.bottom >= window.innerHeight - 20
+
+            const isSideRail =
+              r.height >= window.innerHeight * 0.45 &&
+              r.width >= 120 &&
+              (r.left <= 20 || r.right >= window.innerWidth - 20)
+
+            const isInterstitial =
+              r.width >= window.innerWidth * 0.45 &&
+              r.height >= window.innerHeight * 0.35 &&
+              z >= 10
+
+            if (isBigOverlay || isBottomBanner || isSideRail || isInterstitial) {
+              el.remove()
+            }
+          })
+
+          document.body.style.overflow = ''
+          document.documentElement.style.overflow = ''
+        }
+
         function zapKillAggressiveOverlays() {
+          if (zapHasPaywallFramework()) return;
+
           zapKillAdSkins();
           zapKillAdElements();
 
@@ -416,8 +483,36 @@ function setupPrivacy(ses) {
     if (!priv.adblock) return cb({})
 
     // Never block static assets — doing so breaks page rendering
+    // Balanced compatibility mode:
+    // do not block scripts at network level, because many modern news sites
+    // destroy page content when anti-adblock/paywall scripts detect missing deps.
     const passThrough = ['image', 'imageset', 'font', 'media', 'stylesheet']
     if (passThrough.includes(details.resourceType)) return cb({})
+
+    try {
+      const u = new URL(details.url)
+
+      if (
+        u.hostname.endsWith('corriere.it') ||
+        u.hostname.endsWith('corriereobjects.it') ||
+        u.hostname.endsWith('tinypass.com') ||
+        u.hostname.endsWith('piano.io')
+      ) {
+        return cb({})
+      }
+    } catch (_) {}
+
+    const safePatterns = [
+      'subscriptions.js',
+      'chartbeat_mab',
+      'prebid',
+      'cxense',
+      'permutive'
+    ]
+
+    if (safePatterns.some(p => details.url.includes(p))) {
+      return cb({})
+    }
 
     if (bl.shouldBlock(details.url, details.referrer || '')) {
       bl.incrementBlocked()
