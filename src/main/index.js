@@ -6,6 +6,7 @@ const wallet = require('./wallet')
 const nostr  = require('./nostr')
 const nwc    = require('./nwc')
 const bl     = require('./blocklist')
+const cosmetic = require('./cosmetic')
 const doh    = require('./doh')
 const v4v    = require('./value4value')
 const cashu  = require('./cashu')
@@ -157,7 +158,7 @@ function createMainView() {
 
   view.webContents.on('console-message', (_event, level, message) => {
     if (!ZAP_DEBUG) return
-    if (String(message).includes('[ZapAds]')) {
+    if (String(message).includes('[ZapAds]') || String(message).includes('[ZapCosmetic]')) {
       console.log(`[webview] ${message}`)
     }
   })
@@ -259,6 +260,8 @@ function createMainView() {
   function injectOverlayProtection() {
     const priv = DB.getPrivacy()
     if (!priv.adblock || !priv.popup_block || !priv.overlay_block) return
+
+    view.webContents.executeJavaScript(cosmetic.getCosmeticScript()).catch(() => {})
 
     view.webContents.executeJavaScript(`
       (function() {
