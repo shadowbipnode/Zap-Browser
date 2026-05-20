@@ -199,6 +199,11 @@ function removeFavorite(id) {
   return { ok: true }
 }
 
+function updateFavoriteTitle(id, title) {
+  db.prepare('UPDATE favorites SET title=? WHERE id=?').run(title, id)
+  return { ok: true, id, title }
+}
+
 // ── Cashu ─────────────────────────────────────────────────────────────────────
 function cashuGetBalance() {
   const row = db
@@ -275,7 +280,7 @@ module.exports = {
   init,
   getSetting, setSetting,
   getPrivacy, setPrivacy,
-  getFavorites, addFavorite, removeFavorite,
+  getFavorites, addFavorite, removeFavorite, updateFavoriteTitle,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission, clearNostrPermissions,

@@ -1098,6 +1098,12 @@ ipcMain.handle('remove-favorite', (_, { id }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
   return DB.removeFavorite(id)
 })
+
+ipcMain.handle('rename-favorite', (_, { id, title }) => {
+  V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
+  V.assert(typeof title === 'string' && title.trim().length > 0 && title.length <= 300, 'Invalid title')
+  return DB.updateFavoriteTitle(Number(id), title.trim())
+})
 ipcMain.handle('import-favorites-html', (_, { html }) => {
   V.assert(typeof html === 'string' && html.length <= 10_000_000, 'Invalid bookmarks HTML')
 

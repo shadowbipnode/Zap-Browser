@@ -26,6 +26,7 @@ export default function BrowserPage() {
   const [favBar,      setFavBar]    = useState<any[]>([])
   const [showFavBar,  setShowFavBar] = useState(() => localStorage.getItem('showFavBar') !== 'false')
   const [favDropOpen, setFavDropOpen] = useState(false)
+  const [favFolderOpen, setFavFolderOpen] = useState<any>(null)
   const [favBarMax, setFavBarMax] = useState(10)
   const [currentUA, setCurrentUA] = useState('')
   const [payment, setPayment]   = useState<any>(null)
@@ -64,17 +65,21 @@ export default function BrowserPage() {
   // Dynamic bookmarks bar capacity
   useEffect(() => {
     const calc = () => {
-      const w = window.innerWidth || 1200
-      const reserved = 420
-      const avgItem = 125
-      const max = Math.max(4, Math.floor((w - reserved) / avgItem))
+      const el = document.querySelector('[data-zap-favbar="1"]') as HTMLElement | null
+      const w = el?.clientWidth || window.innerWidth || 1200
+      const overflowReserve = 36
+      const avgItem = 82
+      const max = Math.max(4, Math.floor((w - overflowReserve) / avgItem))
       setFavBarMax(max)
     }
 
     calc()
+    setTimeout(calc, 150)
+    setTimeout(calc, 500)
+
     window.addEventListener('resize', calc)
     return () => window.removeEventListener('resize', calc)
-  }, [])
+  }, [favBar.length])
 
   // Load app version / update status
   useEffect(() => {
@@ -652,53 +657,217 @@ export default function BrowserPage() {
           <button className={`panel-btn ${panel === 'settings' ? 'active' : ''}`} onClick={() => togglePanel('settings')}>⚙️</button>
         </div>
       </div>
-
       {/* ── Bookmarks bar ────────────────────────────────────────── */}
       {showFavBar && favBar.length > 0 && (() => {
-        const rootFavs = favBar.filter((f:any) =>
+        const byParent: Record<string, any[]> = {}
+
+        favBar.forEach((f:any) => {
+          const key = String(f.parent_id ?? 'root')
+          if (!byParent[key]) byParent[key] = []
+          byParent[key].push(f)
+        })
+
+        const rootFolders = favBar.filter((f:any) =>
           !f.parent_id &&
-          String(f.title || '').toLowerCase() !== 'bookmarks bar' &&
-          String(f.title || '').toLowerCase() !== 'barra dei preferiti'
+          Number(f.is_folder) === 1 &&
+          ['bookmarks bar', 'barra dei preferiti'].includes(String(f.title || '').toLowerCase())
         )
-        const visible = rootFavs.slice(0, favBarMax)
-        const hidden  = rootFavs.slice(favBarMax)
-        return (
-          <div style={{
-            display:'flex', alignItems:'center', gap:2,
-            padding:'2px 8px', borderBottom:'1px solid var(--b0)',
-            background:'var(--bg-1)', flexShrink:0,
-            WebkitAppRegion:'no-drag' as any, height:28, position:'relative',
-          }}>
-            {visible.map((f: any) => (
+
+        const barRootId = rootFolders[0]?.id ?? null
+
+        const rawBarItems = barRootId
+          ? (byParent[String(barRootId)] || [])
+          : favBar.filter((f:any) =>
+              !f.parent_id &&
+              !['bookmarks bar', 'barra dei preferiti'].includes(String(f.title || '').toLowerCase())
+            )
+
+        const barItems = [...rawBarItems].sort((a:any, b:any) => {
+          const af = Number(a.is_folder) === 1 ? 1 : 0
+          const bf = Number(b.is_folder) === 1 ? 1 : 0
+          if (af !== bf) return af - bf
+          return Number(a.sort_order || 0) - Number(b.sort_order || 0)
+        })
+
+        const createFolderInBar = async () => {
+          console.log('[FavBar] createFolderInBar called')
+          const title = 'Nuova cartella'
+
+          await window.zap?.addFavorite({
+            title,
+            url: '',
+            favicon: null,
+            parent_id: barRootId,
+            is_folder: 1,
+            sort_order: Date.now()
+          })
+
+          const f = await window.zap?.getFavorites()
+          setFavBar(f || [])
+          window.dispatchEvent(new Event('favorites-updated'))
+        }
+
+        const visible = barItems.slice(0, favBarMax)
+        const hidden  = barItems.slice(favBarMax)
+
+        const getChildren = (id:any) => byParent[String(id)] || []
+
+        const openFav = (f:any) => {
+          if (Number(f.is_folder) === 1) {
+            setFavFolderOpen(favFolderOpen === f.id ? null : f.id)
+            setFavDropOpen(false)
+            return
+          }
+
+          handleNavigate(f.url)
+          setFavFolderOpen(null)
+          setFavDropOpen(false)
+        }
+
+        const renderMenuItems = (items:any[], depth = 0): any[] => {
+          return items.flatMap((f:any) => {
+            const isFolder = Number(f.is_folder) === 1
+            const children = isFolder ? getChildren(f.id) : []
+
+            return [
               <button
-                key={f.id}
+                key={`menu-${f.id}`}
                 onClick={() => {
-                  if (Number(f.is_folder) === 1) return
+                  if (isFolder) return
                   handleNavigate(f.url)
+                  setFavFolderOpen(null)
+                  setFavDropOpen(false)
                 }}
                 onMouseDown={(e) => {
-                  if (e.button === 1) {
+                  if (!isFolder && e.button === 1) {
                     e.preventDefault()
                     handleNewTab(f.url)
+                    setFavFolderOpen(null)
+                    setFavDropOpen(false)
                   }
                 }}
-                title={f.url}
                 style={{
-                  background:'none', border:'none', cursor:'pointer',
-                  color:'var(--t0)', fontSize:11, padding:'2px 7px',
-                  borderRadius:'var(--r-sm)', whiteSpace:'nowrap',
-                  display:'flex', alignItems:'center', gap:3, flexShrink:0,
+                  display:'flex',
+                  alignItems:'center',
+                  gap:6,
+                  width:'100%',
+                  textAlign:'left',
+                  background:'none',
+                  border:'none',
+                  cursor: isFolder ? 'default' : 'pointer',
+                  color:'var(--t0)',
+                  fontSize:12,
+                  padding:`7px 12px 7px ${12 + depth * 14}px`,
+                  whiteSpace:'nowrap',
+                  overflow:'hidden',
+                  textOverflow:'ellipsis',
                 }}
                 onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
                 onMouseLeave={e => (e.currentTarget.style.background='none')}
               >
-                {Number(f.is_folder) === 1 ? '📁' : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
-              </button>
-            ))}
+                <span>{isFolder ? '📁' : '🌐'}</span>
+                <span style={{overflow:'hidden', textOverflow:'ellipsis'}}>{f.title || f.url}</span>
+              </button>,
+              ...(isFolder ? renderMenuItems(children, depth + 1) : [])
+            ]
+          })
+        }
+
+        return (
+          <div
+            data-zap-favbar="1"
+            onContextMenuCapture={(e) => {
+              console.log('[FavBar] context menu capture', e.target)
+              e.preventDefault()
+              e.stopPropagation()
+              createFolderInBar()
+            }}
+            onContextMenu={(e) => {
+              console.log('[FavBar] context menu bubble', e.target)
+            }}
+            style={{
+              display:'flex', alignItems:'center', gap:2,
+              padding:'2px 8px', borderBottom:'1px solid var(--b0)',
+              background:'var(--bg-1)', flexShrink:0,
+              WebkitAppRegion:'no-drag' as any, height:28, position:'relative',
+            }}
+          >
+            <button
+              onClick={() => {
+                console.log('[FavBar] plus clicked')
+                createFolderInBar()
+              }}
+              title="Nuova cartella preferiti"
+              style={{
+                background:'none',
+                border:'none',
+                cursor:'pointer',
+                color:'var(--t2)',
+                fontSize:12,
+                padding:'2px 7px',
+                borderRadius:'var(--r-sm)',
+                flexShrink:0,
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
+              onMouseLeave={e => (e.currentTarget.style.background='none')}
+            >＋</button>
+
+            {visible.map((f: any) => {
+              const isFolder = Number(f.is_folder) === 1
+              const children = isFolder ? getChildren(f.id) : []
+
+              return (
+                <div key={f.id} style={{ position:'relative', flexShrink:0 }}>
+                  <button
+                    onClick={() => openFav(f)}
+                    onMouseDown={(e) => {
+                      if (!isFolder && e.button === 1) {
+                        e.preventDefault()
+                        handleNewTab(f.url)
+                      }
+                    }}
+                    title={isFolder ? f.title : f.url}
+                    style={{
+                      background:'none', border:'none', cursor:'pointer',
+                      color:'var(--t0)', fontSize:11, padding:'2px 7px',
+                      borderRadius:'var(--r-sm)', whiteSpace:'nowrap',
+                      display:'flex', alignItems:'center', gap:3, flexShrink:0,
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
+                    onMouseLeave={e => (e.currentTarget.style.background='none')}
+                  >
+                    {isFolder ? '📁' : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
+                  </button>
+
+                  {isFolder && favFolderOpen === f.id && (
+                    <div style={{
+                      position:'absolute',
+                      top:24,
+                      left:0,
+                      zIndex:9999,
+                      background:'var(--bg-1)',
+                      border:'1px solid var(--b1)',
+                      borderRadius:'var(--r-md)',
+                      boxShadow:'0 8px 32px rgba(0,0,0,.45)',
+                      minWidth:240,
+                      maxWidth:360,
+                      maxHeight:360,
+                      overflowY:'auto',
+                      padding:'4px 0',
+                    }}>
+                      {children.length === 0
+                        ? <div style={{fontSize:12,color:'var(--t2)',padding:'8px 12px'}}>Cartella vuota</div>
+                        : renderMenuItems(children)}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
             {hidden.length > 0 && (
               <div style={{ position:'relative', marginLeft:'auto', flexShrink:0 }}>
                 <button
-                  onClick={() => setFavDropOpen(d => !d)}
+                  onClick={() => { setFavDropOpen(d => !d); setFavFolderOpen(null) }}
                   style={{
                     background:'none', border:'none', cursor:'pointer',
                     color:'var(--t2)', fontSize:12, padding:'2px 7px',
@@ -707,36 +876,15 @@ export default function BrowserPage() {
                   onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
                   onMouseLeave={e => (e.currentTarget.style.background='none')}
                 >»</button>
+
                 {favDropOpen && (
                   <div style={{
                     position:'absolute', top:24, right:0, zIndex:9999,
                     background:'var(--bg-1)', border:'1px solid var(--b1)',
-                    borderRadius:'var(--r-md)', boxShadow:'0 8px 32px rgba(0,0,0,.4)',
-                    minWidth:220, maxHeight:300, overflowY:'auto',
+                    borderRadius:'var(--r-md)', boxShadow:'0 8px 32px rgba(0,0,0,.45)',
+                    minWidth:260, maxHeight:360, overflowY:'auto', padding:'4px 0',
                   }}>
-                    {hidden.map((f: any) => (
-                      <button
-                        key={f.id}
-                        onClick={() => { handleNavigate(f.url); setFavDropOpen(false) }}
-                        onMouseDown={(e) => {
-                          if (e.button === 1) {
-                            e.preventDefault()
-                            handleNewTab(f.url)
-                            setFavDropOpen(false)
-                          }
-                        }}
-                        style={{
-                          display:'block', width:'100%', textAlign:'left',
-                          background:'none', border:'none', cursor:'pointer',
-                          color:'var(--t0)', fontSize:12, padding:'8px 12px',
-                          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
-                        }}
-                        onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
-                        onMouseLeave={e => (e.currentTarget.style.background='none')}
-                      >
-                        🌐 {f.title || f.url}
-                      </button>
-                    ))}
+                    {renderMenuItems(hidden)}
                   </div>
                 )}
               </div>
@@ -744,6 +892,7 @@ export default function BrowserPage() {
           </div>
         )
       })()}
+
 
       {/* ── Browser body ─────────────────────────────────────────────── */}
       <div className="app-body">

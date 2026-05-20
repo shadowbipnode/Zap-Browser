@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-interface Fav { id:number; title:string; url:string; favicon?:string }
+interface Fav { id:number; title:string; url:string; favicon?:string; parent_id?:number|null; is_folder?:number; sort_order?:number }
 interface Props {
   onClose:()=>void
   onNavigate:(url:string)=>void
@@ -15,6 +15,8 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
   const [url,   setUrl]   = useState('')
   const [add,   setAdd]   = useState(false)
   const [msg,   setMsg]   = useState('')
+  const [editingId, setEditingId] = useState<number|null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -65,6 +67,33 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     await (window as any).zap?.removeFavorite({ id }); load()
   }
 
+  const startRename = (f: Fav) => {
+    setEditingId(f.id)
+    setEditingTitle(f.title || '')
+  }
+
+  const saveRename = async () => {
+    if (!editingId || !editingTitle.trim()) {
+      setEditingId(null)
+      setEditingTitle('')
+      return
+    }
+
+    await (window as any).zap?.renameFavorite({
+      id: editingId,
+      title: editingTitle.trim()
+    })
+
+    setEditingId(null)
+    setEditingTitle('')
+    load()
+  }
+
+  const cancelRename = () => {
+    setEditingId(null)
+    setEditingTitle('')
+  }
+
   const buildTree = (items: Fav[]) => {
     const byParent: Record<string, Fav[]> = {}
 
@@ -84,7 +113,22 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
             <div key={`folder-${f.id}`} className="fav-item" style={{ paddingLeft: 16 + depth * 14 }}>
               <span className="fav-ico">📁</span>
               <div className="fav-info">
-                <div className="fav-title">{f.title}</div>
+                {editingId === f.id ? (
+                  <input
+                    autoFocus
+                    value={editingTitle}
+                    onChange={e => setEditingTitle(e.target.value)}
+                    onBlur={saveRename}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') saveRename()
+                      if (e.key === 'Escape') cancelRename()
+                    }}
+                    onClick={e => e.stopPropagation()}
+                    style={{width:'100%',background:'var(--bg-2)',color:'var(--t0)',border:'1px solid var(--b1)',borderRadius:6,padding:'3px 6px'}}
+                  />
+                ) : (
+                  <div className="fav-title" onDoubleClick={() => startRename(f)}>{f.title}</div>
+                )}
                 <div className="fav-url">Folder</div>
               </div>
               <button className="fav-rm"
@@ -104,7 +148,22 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
             }}>
             <span className="fav-ico">🌐</span>
             <div className="fav-info">
-              <div className="fav-title">{f.title}</div>
+              {editingId === f.id ? (
+                <input
+                  autoFocus
+                  value={editingTitle}
+                  onChange={e => setEditingTitle(e.target.value)}
+                  onBlur={saveRename}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') saveRename()
+                    if (e.key === 'Escape') cancelRename()
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  style={{width:'100%',background:'var(--bg-2)',color:'var(--t0)',border:'1px solid var(--b1)',borderRadius:6,padding:'3px 6px'}}
+                />
+              ) : (
+                <div className="fav-title" onDoubleClick={() => startRename(f)}>{f.title}</div>
+              )}
               <div className="fav-url">{f.url}</div>
             </div>
             <button className="fav-rm"
