@@ -262,6 +262,25 @@ function createMainView() {
 
     view.webContents.executeJavaScript(`
       (function() {
+        function zapGenericCosmeticShields() {
+          if (document.getElementById('__zap_generic_cosmetic')) return;
+
+          const style = document.createElement('style');
+          style.id = '__zap_generic_cosmetic';
+          style.textContent = [
+            '[id*="div-gpt-ad"], [id*="google_ads_iframe"], [id*="google_ads"], [id*="gpt-ad"], [id*="adunit"], [class*="adunit"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle, [data-ad-slot], [data-ad-client], [data-google-query-id] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }',
+            'iframe[src*="googlesyndication"], iframe[src*="doubleclick"], iframe[src*="googleads"], iframe[src*="adservice"], iframe[src*="/ads/"], iframe[src*="prebid"] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }',
+            '[id*="PN-SKIN"], [id*="PN-INTRO"], [id*="PN-TOP"], [id*="PN-BANNER"], [id*="PN-MPU"], [id*="skin-ad"], [class*="skin-ad"], [id*="ad-skin"], [class*="ad-skin"] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }'
+          ].join('\\n');
+
+          document.documentElement.appendChild(style);
+
+          document.querySelectorAll('[id*="div-gpt-ad"], [id*="google_ads_iframe"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle, [data-ad-slot], [data-ad-client]').forEach(el => {
+            const wrap = el.closest('.ads-contrib, .adunit') || el;
+            wrap.remove();
+          });
+        }
+
         function zapInjectAdCosmeticCSS() {
           if (document.getElementById('__zap_ad_cosmetic')) return;
 
@@ -461,6 +480,7 @@ function createMainView() {
         }
 
         function zapKillAggressiveOverlays() {
+          zapGenericCosmeticShields();
           zapClickSkipIntro();
 
           // Precise GPT / Google Ads cleanup
