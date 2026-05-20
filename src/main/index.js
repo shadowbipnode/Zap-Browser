@@ -13,6 +13,7 @@ const lnurl  = require('./lnurl')
 const V = require('./validate')
 
 const isDev = !app.isPackaged
+const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
 let mainWindow  = null
 let activeView  = null
@@ -154,6 +155,13 @@ function createMainView() {
     }
   })
 
+  view.webContents.on('console-message', (_event, level, message) => {
+    if (!ZAP_DEBUG) return
+    if (String(message).includes('[ZapAds]')) {
+      console.log(`[webview] ${message}`)
+    }
+  })
+
   view.webContents.on('page-title-updated', (_, title) => {
     if (!activeTabId) return
     mainWindow?.webContents.send('tab-updated', {
@@ -254,7 +262,20 @@ function createMainView() {
 
     view.webContents.executeJavaScript(`
       (function() {
+        function zapInjectAdCosmeticCSS() {
+          if (document.getElementById('__zap_ad_cosmetic')) return;
+
+          const style = document.createElement('style');
+          style.id = '__zap_ad_cosmetic';
+          style.textContent = [
+            'html, body { background-image: none !important; background-color: #fff !important; }',
+            '[id*="div-gpt-ad"], [id*="google_ads_iframe"], [id*="PN-SKIN"], [id*="PN-INTRO"], [id*="PN-TOP"], [id*="PN-BANNER"], [id*="PN-MASTHEAD"], [id*="PN-MPU"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle { display: none !important; visibility: hidden !important; height: 0 !important; max-height: 0 !important; overflow: hidden !important; }'
+          ].join('\n');
+          document.documentElement.appendChild(style);
+        }
+
         function zapKillAdSkins() {
+          zapInjectAdCosmeticCSS();
           const skinSelectors = [
             'body',
             'html',
@@ -276,12 +297,12 @@ function createMainView() {
               if (
                 bg &&
                 bg !== 'none' &&
-                /(ad|adv|ads|banner|pubblic|sponsor|campaign|autoligure|volkswagen|promo)/i.test(bg)
+                /(ad|adv|ads|banner|pubblic|sponsor|campaign|autoligure|volkswagen|promo|coop|ipercoop|buono|sconto|bmw|gino)/i.test(bg)
               ) {
                 el.style.backgroundImage = 'none';
                 el.style.background = 'transparent';
               }
-            });
+            // });
           }
         }
 
@@ -299,6 +320,55 @@ function createMainView() {
             );
 
             if (adRegex.test(html) || el.tagName === 'IFRAME' || el.tagName === 'INS') {
+              el.style.setProperty('display', 'none', 'important');
+              el.style.setProperty('visibility', 'hidden', 'important');
+              el.style.setProperty('height', '0px', 'important');
+              el.style.setProperty('max-height', '0px', 'important');
+              el.style.setProperty('overflow', 'hidden', 'important');
+            }
+          });
+        }
+
+        function zapKillAdImagesAndLinks() {
+          const adTextRegex = /(pubblicit|advert|sponsor|promo|coupon|offerta|scopri|buono|sconto|coop|ipercoop|autoligure|volkswagen|bmw|gino|banner)/i;
+
+          document.querySelectorAll('a, img, picture, source, div, section, aside').forEach(el => {
+            if (zapLooksLikePaywall && zapLooksLikePaywall(el)) return;
+
+            const st = window.getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+
+            if (r.width < 120 || r.height < 40) return;
+
+            const txt = [
+              el.innerText || '',
+              el.getAttribute?.('href') || '',
+              el.getAttribute?.('src') || '',
+              el.getAttribute?.('srcset') || '',
+              el.getAttribute?.('alt') || '',
+              el.getAttribute?.('title') || '',
+              el.id || '',
+              el.className || ''
+            ].join(' ');
+
+            const looksAd = adTextRegex.test(txt);
+            if (!looksAd) return;
+
+            const isTopBanner =
+              r.width >= window.innerWidth * 0.45 &&
+              r.height >= 80 &&
+              r.top <= 260;
+
+            const isSideSkin =
+              r.height >= window.innerHeight * 0.35 &&
+              r.width >= 120 &&
+              (r.left <= 80 || r.right >= window.innerWidth - 80);
+
+            const isLargeInlineAd =
+              r.width >= window.innerWidth * 0.35 &&
+              r.height >= 90;
+
+            if (isTopBanner || isSideSkin || isLargeInlineAd) {
               el.style.setProperty('display', 'none', 'important');
               el.style.setProperty('visibility', 'hidden', 'important');
               el.style.setProperty('height', '0px', 'important');
@@ -327,11 +397,11 @@ function createMainView() {
 
           if (zapLooksLikePaywall(el)) return false
 
-          return /pubblicit|advert|advertising|sponsor|sponsored|promo|coupon|offerta|limited|scopri di più|scopri come|buono|sconto|banner|adv|adsbygoogle|googlesyndication|doubleclick|amazon|coop|ipercoop|auto|bmw|volkswagen/.test(html + ' ' + txt)
+          return /pubblicit|advert|advertising|sponsor|sponsored|promo|coupon|offerta|limited|scopri di più|scopri come|buono|sconto|banner|adv|adsbygoogle|googlesyndication|doubleclick|amazon|coop|ipercoop|autoligure|volkswagen|bmw|fullscreen|skip intro|salta intro|entra nel sito/.test(html + ' ' + txt)
         }
 
         function zapKillAdOverlays() {
-          document.querySelectorAll('body *').forEach(el => {
+          // document.querySelectorAll('body *').forEach(el => {
             const st = window.getComputedStyle(el)
             const r = el.getBoundingClientRect()
 
@@ -373,11 +443,37 @@ function createMainView() {
           document.documentElement.style.overflow = ''
         }
 
+        function zapClickSkipIntro() {
+          document.querySelectorAll('a, button').forEach(el => {
+            const txt = String(el.innerText || el.textContent || '').toLowerCase()
+            const href = String(el.getAttribute?.('href') || '').toLowerCase()
+
+            if (
+              txt.includes('salta intro') ||
+              txt.includes('entra nel sito') ||
+              txt.includes('skip intro') ||
+              href.includes('noadv') ||
+              href.includes('skip')
+            ) {
+              el.click()
+            }
+          })
+        }
+
         function zapKillAggressiveOverlays() {
+          zapClickSkipIntro();
+
+          // Precise GPT / Google Ads cleanup
+          document.querySelectorAll('[id*="div-gpt-ad"], [id*="google_ads_iframe"], .ads-contrib, .adunit').forEach(el => {
+            const wrap = el.closest('.ads-contrib') || el;
+            wrap.remove();
+          });
+
           const hasPaywall = zapHasPaywallFramework();
 
           zapKillAdSkins();
           zapKillAdElements();
+          zapKillAdImagesAndLinks();
 
           if (hasPaywall) {
             document.body.style.overflow = '';
@@ -424,6 +520,43 @@ function createMainView() {
 
           document.body.style.overflow = '';
           document.documentElement.style.overflow = '';
+        }
+
+        if (location.hostname.includes('cittadellaspezia')) {
+          setTimeout(() => {
+            [...document.querySelectorAll('body *')].forEach(el => {
+              const st = getComputedStyle(el);
+              const r = el.getBoundingClientRect();
+              const txt = [
+                el.id || '',
+                el.className || '',
+                el.getAttribute?.('src') || '',
+                el.getAttribute?.('href') || '',
+                el.getAttribute?.('style') || '',
+                el.innerText || ''
+              ].join(' ').slice(0, 300);
+
+              if (
+                r.width >= innerWidth * 0.35 ||
+                r.height >= innerHeight * 0.25 ||
+                st.position === 'fixed' ||
+                st.position === 'sticky'
+              ) {
+                console.warn('[ZapAds]', JSON.stringify({
+                  tag: el.tagName,
+                  id: el.id || '',
+                  cls: String(el.className || '').slice(0,120),
+                  pos: st.position,
+                  z: st.zIndex,
+                  w: Math.round(r.width),
+                  h: Math.round(r.height),
+                  top: Math.round(r.top),
+                  left: Math.round(r.left),
+                  txt
+                }));
+              }
+            });
+          }, 3000);
         }
 
         zapKillAggressiveOverlays();
