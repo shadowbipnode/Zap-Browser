@@ -249,7 +249,8 @@ function createMainView() {
   view.webContents.on('will-prevent-unload', (e) => e.preventDefault())
 
   function injectOverlayProtection() {
-    if (!DB.getPrivacy().adblock) return
+    const priv = DB.getPrivacy()
+    if (!priv.adblock || !priv.popup_block || !priv.overlay_block) return
 
     view.webContents.executeJavaScript(`
       (function() {

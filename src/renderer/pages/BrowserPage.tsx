@@ -321,8 +321,16 @@ export default function BrowserPage() {
   }
 
   const toggleAdblock = async () => {
-    const p = await window.zap?.setAdblock({ enabled: !privacy?.adblock })
+    const enabled = !privacy?.adblock
+
+    await window.zap?.setAdblock({ enabled })
+    await window.zap?.setPopupBlock?.({ enabled })
+    await window.zap?.setOverlayBlock?.({ enabled })
+
+    const p = await window.zap?.getPrivacy()
     setPrivacy(p)
+
+    window.zap?.tabReload?.({ tabId: activeId })
   }
   const toggleWebRTC = async () => {
     const p = await window.zap?.setWebRTC({ enabled: !privacy?.webrtc_protect })
