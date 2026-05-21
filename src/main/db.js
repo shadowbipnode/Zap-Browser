@@ -237,6 +237,37 @@ function updateFavoriteTitle(id, title) {
   return { ok: true, id, title }
 }
 
+function moveFavorite(id, parent_id = null) {
+  const item = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(id)
+  if (!item) return { ok: false, error: 'Favorite not found' }
+
+  const targetParent = parent_id === null || parent_id === undefined ? null : Number(parent_id)
+
+  if (targetParent !== null) {
+    const parent = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(targetParent)
+
+    if (!parent || Number(parent.is_folder) !== 1) {
+      return { ok: false, error: 'Invalid target folder' }
+    }
+
+    if (Number(item.is_folder) === 1) {
+      let cursor = parent
+
+      while (cursor) {
+        if (Number(cursor.id) === Number(id)) {
+          return { ok: false, error: 'Cannot move folder into itself or one of its children' }
+        }
+
+        cursor = db.prepare('SELECT id, parent_id FROM favorites WHERE id=?').get(cursor.parent_id)
+      }
+    }
+  }
+
+  db.prepare('UPDATE favorites SET parent_id=? WHERE id=?').run(targetParent, id)
+
+  return { ok: true, id, parent_id: targetParent }
+}
+
 // ── Cashu ─────────────────────────────────────────────────────────────────────
 function cashuGetBalance() {
   const row = db
@@ -313,7 +344,7 @@ module.exports = {
   init,
   getSetting, setSetting,
   getPrivacy, setPrivacy,
-  getFavorites, addFavorite, removeFavorite, updateFavoriteTitle,
+  getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission, clearNostrPermissions,

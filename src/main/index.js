@@ -1181,6 +1181,17 @@ ipcMain.handle('rename-favorite', (_, { id, title }) => {
   V.assert(typeof title === 'string' && title.trim().length > 0 && title.length <= 300, 'Invalid title')
   return DB.updateFavoriteTitle(Number(id), title.trim())
 })
+
+ipcMain.handle('move-favorite', (_, { id, parent_id }) => {
+  V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
+
+  if (parent_id !== null && parent_id !== undefined) {
+    V.assert(Number.isSafeInteger(Number(parent_id)), 'Invalid parent folder id')
+  }
+
+  return DB.moveFavorite(Number(id), parent_id === 'root' ? null : parent_id)
+})
+
 ipcMain.handle('import-favorites-html', (_, { html }) => {
   V.assert(typeof html === 'string' && html.length <= 10_000_000, 'Invalid bookmarks HTML')
 

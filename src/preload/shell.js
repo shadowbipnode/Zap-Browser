@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('zap', {
   addFavorite:         (a) => ipcRenderer.invoke('add-favorite', a),
   removeFavorite:      (a) => ipcRenderer.invoke('remove-favorite', a),
   renameFavorite:      (a) => ipcRenderer.invoke('rename-favorite', a),
+  moveFavorite:        (a) => ipcRenderer.invoke('move-favorite', a),
   importFavoritesHtml: (a) => ipcRenderer.invoke('import-favorites-html', a),
 
   // Cashu
