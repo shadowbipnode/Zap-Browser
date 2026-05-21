@@ -30,6 +30,10 @@ export default function BrowserPage() {
   const [favContext, setFavContext] = useState<any>(null)
   const [favRename, setFavRename] = useState<any>(null)
   const [favRenameValue, setFavRenameValue] = useState('')
+  const [showBookmarkSave, setShowBookmarkSave] = useState(false)
+  const [bookmarkFolder, setBookmarkFolder] = useState<string>('root')
+  const [bookmarkTitle, setBookmarkTitle] = useState('')
+  const [bookmarkNewFolderName, setBookmarkNewFolderName] = useState('')
   const [favBarMax, setFavBarMax] = useState(10)
   const [currentUA, setCurrentUA] = useState('')
   const [payment, setPayment]   = useState<any>(null)
@@ -215,11 +219,19 @@ export default function BrowserPage() {
 
   // Notify main of panel state for view resize
   useEffect(() => {
+    const chromeOverlayOpen =
+      showSuggest ||
+      !!favFolderOpen ||
+      favDropOpen ||
+      !!favContext ||
+      showBookmarkSave ||
+      !!favRename
+
     window.zap?.shellResize({
       panelOpen: panel !== null,
-      suggestionsOpen: showSuggest
+      suggestionsOpen: chromeOverlayOpen
     })
-  }, [panel, showSuggest])
+  }, [panel, showSuggest, favFolderOpen, favDropOpen, favContext, showBookmarkSave, favRename])
 
 
   const getActiveOrigin = () => {
@@ -667,6 +679,28 @@ export default function BrowserPage() {
           </button>
         )}
 
+        <button
+          title="Save bookmark"
+          onClick={() => {
+            if (!activeTab?.url || activeTab.url === 'zap://newtab') return
+            setBookmarkTitle(activeTab?.title || activeTab?.url || '')
+            setBookmarkFolder('root')
+            setBookmarkNewFolderName('')
+            setShowBookmarkSave(true)
+          }}
+          style={{
+            background:'none',
+            border:'none',
+            color:'var(--t2)',
+            cursor:'pointer',
+            fontSize:15,
+            padding:'0 8px',
+            flexShrink:0,
+          }}
+        >
+          ⭐
+        </button>
+
         {/* Panel buttons */}
         <div className="panel-btns">
           <button className={`panel-btn ${panel === 'wallet' ? 'active' : ''}`} onClick={() => togglePanel('wallet')}>⚡ Wallet</button>
@@ -675,6 +709,194 @@ export default function BrowserPage() {
           <button className={`panel-btn ${panel === 'settings' ? 'active' : ''}`} onClick={() => togglePanel('settings')}>⚙️</button>
         </div>
       </div>
+      {showBookmarkSave && (
+        <div
+          onClick={() => setShowBookmarkSave(false)}
+          style={{
+            position:'fixed',
+            inset:0,
+            zIndex:999999,
+            background:'transparent',
+            pointerEvents:'auto',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position:'absolute',
+              top:88,
+              right:92,
+              width:360,
+              background:'var(--bg-1)',
+              border:'1px solid var(--b1)',
+              borderRadius:'var(--r-lg)',
+              boxShadow:'0 18px 50px rgba(0,0,0,.55)',
+              padding:14,
+              color:'var(--t0)',
+            }}
+          >
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+              <div style={{fontSize:14,fontWeight:800}}>⭐ Save bookmark</div>
+              <button
+                onClick={() => setShowBookmarkSave(false)}
+                style={{background:'none',border:'none',color:'var(--t2)',cursor:'pointer',fontSize:16}}
+              >×</button>
+            </div>
+
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:11,color:'var(--t2)',marginBottom:5}}>Name</div>
+              <input
+                autoFocus
+                value={bookmarkTitle}
+                onChange={(e) => setBookmarkTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setShowBookmarkSave(false)
+                }}
+                style={{
+                  width:'100%',
+                  boxSizing:'border-box',
+                  background:'var(--bg-2)',
+                  color:'var(--t0)',
+                  border:'1px solid var(--b1)',
+                  borderRadius:'var(--r-md)',
+                  padding:'8px 10px',
+                  fontSize:12,
+                  outline:'none',
+                }}
+              />
+            </div>
+
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:11,color:'var(--t2)',marginBottom:5}}>Folder</div>
+              <select
+                value={bookmarkFolder}
+                onChange={(e) => setBookmarkFolder(e.target.value)}
+                style={{
+                  width:'100%',
+                  padding:'8px 10px',
+                  borderRadius:'var(--r-md)',
+                  background:'var(--bg-2)',
+                  color:'var(--t0)',
+                  border:'1px solid var(--b1)',
+                  fontSize:12,
+                }}
+              >
+                <option value="root">Root</option>
+                <option value="__new__">+ New folder…</option>
+
+                {favBar
+                  .filter((f:any) => Number(f.is_folder) === 1)
+                  .map((f:any) => (
+                    <option key={f.id} value={String(f.id)}>
+                      📁 {f.title}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {bookmarkFolder === '__new__' && (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,color:'var(--t2)',marginBottom:5}}>New folder name</div>
+                <input
+                  value={bookmarkNewFolderName}
+                  onChange={(e) => setBookmarkNewFolderName(e.target.value)}
+                  placeholder="Folder name"
+                  style={{
+                    width:'100%',
+                    boxSizing:'border-box',
+                    background:'var(--bg-2)',
+                    color:'var(--t0)',
+                    border:'1px solid var(--b1)',
+                    borderRadius:'var(--r-md)',
+                    padding:'8px 10px',
+                    fontSize:12,
+                    outline:'none',
+                  }}
+                />
+              </div>
+            )}
+
+            <div style={{
+              fontSize:10,
+              color:'var(--t2)',
+              whiteSpace:'nowrap',
+              overflow:'hidden',
+              textOverflow:'ellipsis',
+              marginBottom:12,
+              fontFamily:'var(--mono)',
+            }}>
+              {activeTab?.url}
+            </div>
+
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button
+                onClick={() => setShowBookmarkSave(false)}
+                style={{
+                  padding:'7px 12px',
+                  borderRadius:'var(--r-md)',
+                  border:'1px solid var(--b1)',
+                  background:'var(--bg-2)',
+                  color:'var(--t0)',
+                  cursor:'pointer',
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={async () => {
+                  if (!activeTab?.url || activeTab.url === 'zap://newtab') return
+
+                  let parentId:any = bookmarkFolder === 'root'
+                    ? null
+                    : Number(bookmarkFolder)
+
+                  if (bookmarkFolder === '__new__') {
+                    const folderName = bookmarkNewFolderName.trim()
+                    if (!folderName) return
+
+                    const created = await window.zap?.addFavorite({
+                      title: folderName,
+                      url: '',
+                      favicon: null,
+                      parent_id: null,
+                      is_folder: 1,
+                      sort_order: Date.now()
+                    })
+
+                    parentId = created?.id ?? null
+                  }
+
+                  await window.zap?.addFavorite({
+                    title: bookmarkTitle.trim() || activeTab.title || activeTab.url,
+                    url: activeTab.url,
+                    favicon: null,
+                    parent_id: parentId
+                  })
+
+                  const f = await window.zap?.getFavorites()
+                  setFavBar(f || [])
+                  window.dispatchEvent(new Event('favorites-updated'))
+
+                  setShowBookmarkSave(false)
+                }}
+                style={{
+                  padding:'7px 12px',
+                  borderRadius:'var(--r-md)',
+                  border:'1px solid var(--a)',
+                  background:'var(--a)',
+                  color:'#fff',
+                  cursor:'pointer',
+                  fontWeight:700,
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Bookmarks bar ────────────────────────────────────────── */}
       {showFavBar && favBar.length > 0 && (() => {
         const byParent: Record<string, any[]> = {}
@@ -761,6 +983,17 @@ export default function BrowserPage() {
                   if (isFolder) return
                   handleNavigate(f.url)
                   setFavFolderOpen(null)
+                  setFavDropOpen(false)
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setFavContext({
+                    x: e.clientX,
+                    y: e.clientY,
+                    item: f,
+                    type: isFolder ? 'folder' : 'bookmark'
+                  })
                   setFavDropOpen(false)
                 }}
                 onMouseDown={(e) => {
@@ -851,7 +1084,10 @@ export default function BrowserPage() {
                 <div key={f.id} style={{ position:'relative', flexShrink:0 }}>
                   <button
                     data-zap-favitem="1"
-                    onClick={() => openFav(f)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openFav(f)
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       e.stopPropagation()

@@ -17,6 +17,8 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
   const [msg,   setMsg]   = useState('')
   const [editingId, setEditingId] = useState<number|null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [selectedFolder, setSelectedFolder] = useState<string>('root')
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({})
 
   useEffect(() => { load() }, [])
 
@@ -32,7 +34,8 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     await (window as any).zap?.addFavorite({
       title: currentTitle || currentUrl,
       url:   currentUrl,
-      favicon: null
+      favicon: null,
+      parent_id: selectedFolder === 'root' ? null : Number(selectedFolder)
     })
     setMsg('Aggiunto!')
     setTimeout(() => setMsg(''), 2000)
@@ -59,7 +62,12 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     if (!title.trim() || !url.trim()) { setMsg('Inserisci titolo e URL'); return }
     let u = url.trim()
     if (!u.startsWith('http')) u = 'https://' + u
-    await (window as any).zap?.addFavorite({ title: title.trim(), url: u, favicon: null })
+    await (window as any).zap?.addFavorite({
+      title: title.trim(),
+      url: u,
+      favicon: null,
+      parent_id: selectedFolder === 'root' ? null : Number(selectedFolder)
+    })
     setTitle(''); setUrl(''); setAdd(false); load()
   }
 
@@ -106,6 +114,8 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     setEditingTitle('')
   }
 
+  const folderOptions = favs.filter(f => Number(f.is_folder) === 1)
+
   const buildTree = (items: Fav[]) => {
     const byParent: Record<string, Fav[]> = {}
 
@@ -117,13 +127,38 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
 
     const renderItems = (parentId: any, depth = 0): any[] => {
       const key = String(parentId ?? 'root')
-      return (byParent[key] || []).flatMap((f: any) => {
+      return (byParent[key] || [])
+        .slice()
+        .sort((a:any, b:any) => {
+          const af = Number(a.is_folder) === 1 ? 0 : 1
+          const bf = Number(b.is_folder) === 1 ? 0 : 1
+          if (af !== bf) return af - bf
+          return Number(a.sort_order || 0) - Number(b.sort_order || 0)
+        })
+        .flatMap((f: any) => {
         const isFolder = Number(f.is_folder) === 1
 
         if (isFolder) {
+          const opened = !!openFolders[String(f.id)]
+
           return [
-            <div key={`folder-${f.id}`} className="fav-item" style={{ paddingLeft: 16 + depth * 14 }}>
-              <span className="fav-ico">📁</span>
+            <div
+              key={`folder-${f.id}`}
+              className="fav-item"
+              style={{ paddingLeft: 16 + depth * 14, cursor:'pointer' }}
+              onClick={() => {
+                setOpenFolders(prev => ({
+                  ...prev,
+                  [String(f.id)]: !prev[String(f.id)]
+                }))
+              }}
+            >
+              <span
+                className="fav-ico"
+                style={{cursor:'pointer'}}
+              >
+                {opened ? '📂' : '📁'}
+              </span>
               <div className="fav-info">
                 {editingId === f.id ? (
                   <input
@@ -146,7 +181,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
               <button className="fav-rm"
                 onClick={e => { e.stopPropagation(); remove(f) }}>×</button>
             </div>,
-            ...renderItems(f.id, depth + 1)
+            ...(opened ? renderItems(f.id, depth + 1) : [])
           ]
         }
 
@@ -196,6 +231,29 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
       </div>
       <div className="panel-body">
         {msg && <div className="msg ok" style={{marginBottom:10}}>{msg}</div>}
+
+        <div style={{marginBottom:10}}>
+          <select
+            value={selectedFolder}
+            onChange={(e) => setSelectedFolder(e.target.value)}
+            style={{
+              width:'100%',
+              padding:'8px 10px',
+              borderRadius:'var(--r-md)',
+              background:'var(--bg-2)',
+              color:'var(--t0)',
+              border:'1px solid var(--b1)',
+              fontSize:12,
+            }}
+          >
+            <option value="root">Save in: Root</option>
+            {folderOptions.map((f) => (
+              <option key={f.id} value={String(f.id)}>
+                📁 {f.title}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="act-row" style={{marginBottom:14}}>
           <button className="act-btn primary" onClick={saveCurrentPage}>
