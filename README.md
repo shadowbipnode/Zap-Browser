@@ -1,21 +1,24 @@
 # ⚡ Zap Browser
 
-> A privacy-focused browser for Bitcoin, Lightning and Nostr workflows.
+> A privacy-focused browser for Lightning, Cashu and Nostr workflows.
 
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-blue)
 ![Status](https://img.shields.io/badge/status-beta-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Bitcoin](https://img.shields.io/badge/Bitcoin-Lightning%20%7C%20Cashu-F7931A)
+![Lightning](https://img.shields.io/badge/Lightning-NWC%20%7C%20LNURL-F7931A)
+![Cashu](https://img.shields.io/badge/Cashu-ecash-orange)
 ![Nostr](https://img.shields.io/badge/Nostr-NIP--07-purple)
 
-Zap Browser is an experimental open-source browser that combines Chromium browsing with native Bitcoin, Lightning and Nostr tooling.
+Zap Browser is an experimental open-source desktop browser focused on privacy, Lightning payments, Cashu ecash and native Nostr identity.
 
-Instead of relying on extensions, Zap integrates Lightning via Nostr Wallet Connect (NWC), native NIP-07 identity support, Cashu ecash, popup and tracker protection, local-first encrypted storage and built-in privacy hardening.
+Instead of relying on browser extensions, Zap integrates Lightning, Cashu and Nostr directly into the browsing experience while keeping everything local-first and privacy-oriented.
+
+The browser includes native Nostr Wallet Connect support, NIP-07 signing, payment protocol detection, bookmark management, download management and built-in browser privacy protections without requiring third-party extensions.
 
 Everything runs locally.
 
-No accounts.
-No telemetry.
+No accounts.  
+No telemetry.  
 No cloud sync.
 
 ---
@@ -24,58 +27,144 @@ No cloud sync.
 
 Zap Browser is currently in active beta.
 
-The project is focused on:
+The browser is already usable for daily testing and experimentation, but it is still early-stage software and should not yet be considered production-ready for large funds or critical operational environments.
 
-* privacy-first browsing
-* Lightning workflows
-* Nostr identity integration
-* local-first security
-* reducing extension dependency
+The current development focus is:
 
-The browser is already usable for daily testing, but security hardening and architecture improvements are still ongoing.
+- Lightning UX
+- Nostr identity integration
+- browser privacy protections
+- local-first architecture
+- removing dependency on extensions
+- browser-grade desktop UX
 
-This is not production-ready software for large funds.
+---
+
+# What's New in v0.4.0-beta
+
+Zap Browser v0.4.0-beta is focused on wallet/payment UX, bookmarks, downloads and privacy architecture improvements.
+
+## Added
+
+### Native payment protocol handling
+
+Zap Browser can now detect and route:
+
+- `lightning:`
+- `lnurl:`
+- `cashu:`
+- `liquid:`
+- `l-btc:`
+
+directly into the browser payment flow.
+
+### Lightning improvements
+
+- Lightning invoice detection from address bar
+- native Lightning payment popup flow
+- LNURL detection flow
+- better NWC integration handling
+
+### Downloads Manager MVP
+
+- Downloads side panel
+- live progress tracking
+- cancel active downloads
+- completed/cancelled states
+- open downloaded file
+- show downloaded file in folder
+
+### Bookmarks overhaul
+
+- redesigned Favorites panel
+- collapsible bookmark folders
+- folder-based saving
+- move bookmarks/folders
+- rename bookmarks/folders
+- recursive folder delete handling
+- bookmark search
+- HTML bookmark import support
+
+### NIP-07 Permissions Center
+
+- persistent Nostr permissions
+- per-site revoke
+- clear all permissions
+- local signer visibility
+- improved NIP-07 compatibility
+- safer permission handling
+
+### Privacy improvements
+
+- Balanced Shields baseline
+- reduced aggressive DOM manipulation
+- reduced layout breakage
+- safer overlay handling
+- improved BrowserView compatibility
 
 ---
 
 # Why Zap Browser
 
-Most browsers treat Bitcoin, Lightning and Nostr as external add-ons.
+Most browsers treat Lightning, Cashu and Nostr as external add-ons.
 
 Zap Browser tries a different approach:
 
-* Lightning is integrated directly into the browser
-* Nostr identity exists natively
-* popup and tracker protection is built-in
-* permissions are handled locally
-* privacy protections do not require extensions
-* all sensitive data stays on-device
+- Lightning is integrated directly into the browser
+- Nostr identity exists natively
+- Cashu ecash is built in
+- privacy protections are enabled by default
+- permissions are handled locally
+- sensitive data stays on-device
 
-The goal is building a sovereign operational browser instead of another extension-heavy Chromium fork.
+The goal is building a sovereign browser for Bitcoin, Lightning, Cashu and Nostr workflows instead of another extension-heavy Chromium fork.
 
 ---
 
 # Core Features
 
-## ⚡ Lightning (NWC)
+## ⚡ Lightning / NWC
 
-Connect any Lightning node using Nostr Wallet Connect.
-
-Compatible with:
-
-* Alby
-* Zeus
-* LNbits
-* Blink
-* Coinos
+Connect a Lightning wallet or node using Nostr Wallet Connect.
 
 Features:
 
-* Pay invoices
-* Create invoices
-* Lightning Address support
-* Balance checks
-* Encrypted NIP-47 communication
+- Pay invoices
+- Create invoices
+- Lightning invoice detection
+- LNURL detection
+- balance checks
+- encrypted NIP-47 communication
+- native payment popup flow
+
+Compatible with wallets and tools supporting NWC.
+
+---
+
+## 🔗 LNURL
+
+Zap Browser detects LNURL-style payment requests directly inside the browser.
+
+Current v0.4 behavior:
+
+- LNURL detection
+- LNURL payment routing
+- payment popup integration
+
+Full LNURL-pay/auth flows are planned for future releases.
+
+---
+
+## 🥜 Cashu Ecash
+
+Integrated Chaumian ecash support powered by Cashu.
+
+Features:
+
+- Cashu token detection
+- token receive/send
+- multi-mint support
+- local wallet storage
 
 ---
 
@@ -85,71 +174,95 @@ Zap Browser injects native `window.nostr` support directly into pages.
 
 Features:
 
-* NIP-07 support
-* Persistent permissions
-* Per-site trust controls
-* Local-only signing
-* NIP-06 deterministic key derivation
-* nsec import/replacement
-* Visual trust indicators
-* Permission-aware toolbar indicators
+- NIP-07 support
+- persistent permissions
+- per-site trust controls
+- local-only signing
+- session allow/deny
+- permanent allow/deny
+- relay overview
+- nsec import/replacement
+- local signer identity display
 
-The browser never publishes events automatically.
+Zap Browser acts as a local signer.
+
+The browser does not publish profile metadata automatically and does not modify remote Nostr profiles.
 
 ---
 
-## 🪙 Cashu Ecash
+## ⭐ Bookmarks
 
-Integrated Chaumian ecash wallet powered by Cashu.
+Zap Browser includes a browser-style bookmark system.
 
 Features:
 
-* Multi-mint support
-* Token receive/send
-* Mint directly from Lightning
-* Local wallet storage
-* No blockchain tracking
+- Favorites panel
+- bookmarks bar
+- folders
+- folder-based bookmark saving
+- rename bookmarks/folders
+- move bookmarks/folders
+- recursive delete support
+- collapsible folders
+- bookmark search
+- import bookmarks from HTML
+
+---
+
+## ⬇ Downloads
+
+Zap Browser includes a native Downloads MVP.
+
+Features:
+
+- downloads side panel
+- live progress
+- completed/cancelled states
+- cancel active downloads
+- open downloaded file
+- show file in folder
+
+Persistent download history is planned for future releases.
 
 ---
 
 ## 🛡️ Privacy Protections
 
-Built-in protections enabled by default:
+Built-in protections include:
 
-* 106k+ blocked domains
-* Cosmetic filtering
-* Popup/interstitial blocking
-* Aggressive overlay cleanup
-* Sticky ad suppression
-* WebRTC leak protection
-* Tracking header stripping
-* User-Agent rotation
-* Permissions denied by default
-* Local-only storage
-* No telemetry
+- network-level blocklist
+- cosmetic filtering
+- popup blocking
+- conservative overlay handling
+- sticky ad suppression
+- WebRTC leak protection
+- tracking header stripping
+- User-Agent rotation
+- local-only storage
+- no telemetry
 
-No extensions required.
+Zap Browser v0.4 introduces a Balanced Shields baseline focused on compatibility and reduced site breakage.
 
 ---
 
 ## 🎨 Themes
 
-Zap Browser currently includes:
+Zap Browser currently includes multiple built-in themes, including:
 
-* Obsidian
-* Graphite
-* Midnight
-* Neon Glass
-* Sovereign Terminal
-* Minimal Dark
+- Obsidian
+- Graphite
+- Midnight
+- Neon Glass
+- Sovereign Terminal
+- Minimal Dark
 
-Themes can be changed instantly from Settings.
+Themes can be switched instantly from Settings.
 
 ---
 
 ## 🔄 Built-in Update Checker
 
-The browser can detect new releases directly from GitHub and notify users when updates are available.
+Zap Browser can detect new releases directly from GitHub and notify users when updates are available.
 
 The update system is local-only and does not send telemetry or analytics.
 
@@ -161,20 +274,25 @@ Zap Browser handles real money and private keys.
 
 Because of this:
 
-* sensitive data is encrypted at rest
-* keys stay local
-* Nostr signing happens locally
-* no cloud sync exists
-* strict IPC validation is enforced on sensitive channels
-* permission systems are being expanded continuously
-* Lightning payments require explicit confirmation
+- private keys stay local
+- Nostr signing happens locally
+- NWC secrets remain encrypted locally
+- no cloud sync exists
+- no telemetry exists
+- sensitive IPC channels are validated
+- permissions are explicit
+- Lightning payments require confirmation
 
-Current encryption:
+Current protections include:
 
-* AES-256-GCM
-* OS keychain integration (libsecret / Keychain)
+- AES-256-GCM encryption
+- OS keychain integration
+- local signer isolation
+- blocked metadata signing
+- strict NIP-07 permission flow
 
-This project is still beta software.
+Zap Browser is still beta software.
+
 Do not store life-changing funds inside the browser.
 
 ---
@@ -202,10 +320,10 @@ sudo rpm -Uvh zap-browser.rpm
 
 ## Windows
 
-Download:
+Download either:
 
-* installer `.exe`
-* portable `.zip`
+- installer `.exe`
+- portable `.zip`
 
 from the GitHub Releases page.
 
@@ -228,54 +346,39 @@ npm start
 
 # Quick Start
 
-## Connect a Lightning Node
+## Connect a Lightning Wallet
 
-1. Open Alby / Zeus / LNbits
-2. Create an NWC connection
-3. Copy the `nostr+walletconnect://` string
-4. Open Wallet → NWC inside Zap Browser
-5. Paste connection string
-
-Done.
+1. Open a wallet supporting Nostr Wallet Connect.
+2. Create an NWC connection.
+3. Copy the `nostr+walletconnect://` string.
+4. Open Wallet inside Zap Browser.
+5. Paste the connection string.
+6. Start using Lightning directly from the browser.
 
 ---
 
 # Roadmap
 
-## v0.3.7-beta
+## v0.5 — Native Browser UX & Windowing
 
-* Strict IPC validation hardening
-* Lightning payment confirmation flow
-* Real-time incoming sats notifications
-* Payment success popups
-* SECURITY.md policy
-* Better popup/interstitial protections
-* Improved address bar suggestions
-* Favicon support in suggestions
-* BrowserView layering fixes
-* Theme/UI polish
-* Refreshed app icon
-* README cleanup
+Planned focus:
 
-## v0.4
+- native Electron menus
+- native child windows
+- native bookmark popup
+- native downloads popup/history
+- native permission dialogs
+- native autocomplete architecture
+- removal of unstable React overlays above BrowserView
 
-* LNURL-pay/auth
-* QR code support
-* Real DoH
-* Better site permissions
+## v0.6 — Browser Core Abstraction
 
-## v0.5
+Planned focus:
 
-* Encrypted history
-* Fingerprinting protections
-* Ephemeral/private tabs
-* SOCKS/HTTP proxy support
-
-## v0.6
-
-* Optional Tor mode
-* Hardware wallet research
-* Local relay experiments
+- browser engine abstraction
+- deeper tab/view architecture cleanup
+- future portability research
+- possible Tauri migration evaluation
 
 ---
 
@@ -285,25 +388,33 @@ Contributions, testing and security feedback are welcome.
 
 Priority areas:
 
-* privacy protections
-* Electron hardening
-* Lightning UX
-* LNURL flows
-* security review
-* anti-fingerprinting
-* wallet isolation
+- privacy protections
+- Electron hardening
+- Lightning UX
+- LNURL flows
+- Cashu UX
+- NIP-07 compatibility
+- native browser UI architecture
+- anti-fingerprinting research
 
 ---
 
 # Security
 
-A dedicated `SECURITY.md` policy is planned.
+Zap Browser is beta software.
 
-Until then:
+Please treat it accordingly.
 
-* avoid storing large funds
-* treat the browser as beta software
-* report vulnerabilities responsibly
+Security principles:
+
+- private keys stay local
+- NWC secrets are encrypted locally
+- no automatic Nostr metadata publishing
+- no telemetry
+- explicit permission model
+- local-first architecture
+
+Please report vulnerabilities responsibly.
 
 ---
 
@@ -314,4 +425,3 @@ MIT
 ---
 
 > Not your browser, not your privacy.
-
