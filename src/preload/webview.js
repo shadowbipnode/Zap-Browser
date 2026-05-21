@@ -63,3 +63,5 @@ contextBridge.exposeInMainWorld('nostr', {
     decrypt: (pubkey, text) => ipcRenderer.invoke('nostr-nip04-decrypt', { pubkey, text }),
   },
 })
+
+window.dispatchEvent(new Event('nostr:ready'))

@@ -147,7 +147,20 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
     return false
   }
 
-  nostrSessionPermissions.set(key, 'deny')
+  if (result.response === 3) {
+    // Some Nostr web clients call getPublicKey very early during login.
+    // If Electron's native dialog loses focus or is cancelled unexpectedly,
+    // do not silently poison the session with a deny for getPublicKey.
+    // signEvent remains protected and still requires explicit approval.
+    if (action === 'getPublicKey') {
+      nostrSessionPermissions.set(key, 'allow')
+      return true
+    }
+
+    nostrSessionPermissions.set(key, 'deny')
+    return false
+  }
+
   return false
 }
 

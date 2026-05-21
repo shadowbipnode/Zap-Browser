@@ -52,7 +52,7 @@ async function createProfile(DB, { seedHex, name, about }) {
     .prepare(`INSERT OR REPLACE INTO nostr_profile
       (id, pubkey, npub, encrypted_nsec, name, about, created_at)
       VALUES (1, ?, ?, ?, ?, ?, ?)`)
-    .run(pubKeyHex, npub, encryptedNsec, name || 'anon', about || null, Math.floor(Date.now() / 1000))
+    .run(pubKeyHex, npub, encryptedNsec, name || null, about || null, Math.floor(Date.now() / 1000))
 
   return { pubkey: pubKeyHex, npub, name, about }
 }
@@ -76,7 +76,7 @@ async function importNsec(DB, { nsec, name }) {
     .prepare(`INSERT OR REPLACE INTO nostr_profile
       (id, pubkey, npub, encrypted_nsec, name, created_at)
       VALUES (1, ?, ?, ?, ?, ?)`)
-    .run(pubKeyHex, npub, encryptedNsec, name || 'anon', Math.floor(Date.now() / 1000))
+    .run(pubKeyHex, npub, encryptedNsec, name || null, Math.floor(Date.now() / 1000))
 
   return { pubkey: pubKeyHex, npub, name }
 }
@@ -93,6 +93,10 @@ function getPubkey(DB) {
 }
 
 async function signEvent(DB, event) {
+  if (Number(event?.kind) === 0) {
+    throw new Error('Zap Browser does not sign Nostr metadata updates')
+  }
+
   const row = DB._db()
     .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1')
     .get()

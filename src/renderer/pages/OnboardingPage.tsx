@@ -35,8 +35,8 @@ export default function OnboardingPage({ onDone }: { onDone:()=>void }) {
   const finalize = async (nc: NostrChoice) => {
     setLoading(true); setErr('')
     try {
-      if (nc==='from-seed' && seedHex) await (window as any).zap.nostrCreateProfile({ seedHex, name: name||'anon', about: null })
-      else if (nc==='import-nsec') await (window as any).zap.nostrImportNsec({ nsec: importNsec, name: name||'anon' })
+      if (nc==='from-seed' && seedHex) await (window as any).zap.nostrCreateProfile({ seedHex, name: name || null, about: null })
+      else if (nc==='import-nsec') await (window as any).zap.nostrImportNsec({ nsec: importNsec, name: name || null })
       else await (window as any).zap.nostrSkip()
       setStep('done')
       setTimeout(onDone, 1400)

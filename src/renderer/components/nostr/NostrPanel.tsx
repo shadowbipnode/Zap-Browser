@@ -43,7 +43,7 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
     try {
       await window.zap?.nostrImportNsec({
         nsec: clean,
-        name: name.trim() || 'anon',
+        name: name.trim() || null,
       })
 
       setNsec('')
@@ -131,7 +131,7 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
             <div className="nostr-card">
               <div className="nostr-av">👤</div>
               <div>
-                <div className="nostr-name">{profile.name || 'Anonimo'}</div>
+                <div className="nostr-name">{profile.name || profile.npub?.slice(0,22) + '...'}</div>
                 <div className="nostr-npub">{profile.npub?.slice(0,22)}...</div>
                 {profile.nip05 && (
                   <div style={{ fontSize:11, color:'var(--green)', marginTop:2 }}>
@@ -201,8 +201,36 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
               border:'1px solid var(--b0)',
               borderRadius:'var(--r-md)',
             }}>
-              <div className="sec-title" style={{ marginBottom:10 }}>
-                NIP-07 Permissions
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                <div className="sec-title">
+                  Permissions Center
+                </div>
+                <button
+                  onClick={load}
+                  disabled={busy}
+                  style={{
+                    padding:'4px 8px',
+                    border:'1px solid var(--b1)',
+                    background:'var(--bg-2)',
+                    color:'var(--t1)',
+                    borderRadius:'var(--r-sm)',
+                    cursor:'pointer',
+                    fontSize:10,
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div style={{
+                fontSize:11,
+                color:'var(--t2)',
+                lineHeight:1.5,
+                marginBottom:10,
+              }}>
+                Manage site-level NIP-07 permissions. Sites listed here can request Nostr signing actions according to the stored decision.
+                <br />
+                Stored permissions: <strong style={{color:'var(--t0)'}}>{permissions.length}</strong>
               </div>
 
               {permissions.length === 0 ? (

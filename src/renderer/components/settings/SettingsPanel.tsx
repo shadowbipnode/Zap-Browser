@@ -360,7 +360,7 @@ function NostrSettings({ lang }: { lang: string }) {
     if (!nsec.trim()) return
     setLoading(true); setMsg('')
     try {
-      await z()?.nostrImportNsec({ nsec: nsec.trim(), name: name || profile?.name || 'anon' })
+      await z()?.nostrImportNsec({ nsec: nsec.trim(), name: name || profile?.name || null })
       // Ricarica profilo dal DB
       const updated = await z()?.nostrGetProfile()
       setProfile(updated)
@@ -380,7 +380,7 @@ function NostrSettings({ lang }: { lang: string }) {
         <div className="nostr-card" style={{marginBottom:16}}>
           <div className="nostr-av">👤</div>
           <div>
-            <div className="nostr-name">{profile.name||'Anonimo'}</div>
+            <div className="nostr-name">{profile.name||profile.npub?.slice(0,22) + '...'}</div>
             <div className="nostr-npub">{profile.npub?.slice(0,24)}...</div>
           </div>
         </div>
@@ -394,7 +394,7 @@ function NostrSettings({ lang }: { lang: string }) {
       <p style={{fontSize:11.5,color:'var(--t1)',marginBottom:12,lineHeight:1.6}}>
         {lang==='it'
           ? 'Importa una chiave Nostr esistente. Sostituirà il profilo attuale e pubblicherà i metadati sui relay.'
-          : 'Import an existing Nostr key. Will replace the current profile and publish metadata to relays.'}
+          : 'Import an existing Nostr key. Will replace the local signing identity used by Zap Browser. No metadata or profile changes will be published to Nostr relays.'}
       </p>
 
       {!showImport ? (
