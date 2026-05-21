@@ -27,6 +27,9 @@ export default function BrowserPage() {
   const [showFavBar,  setShowFavBar] = useState(() => localStorage.getItem('showFavBar') !== 'false')
   const [favDropOpen, setFavDropOpen] = useState(false)
   const [favFolderOpen, setFavFolderOpen] = useState<any>(null)
+  const [favContext, setFavContext] = useState<any>(null)
+  const [favRename, setFavRename] = useState<any>(null)
+  const [favRenameValue, setFavRenameValue] = useState('')
   const [favBarMax, setFavBarMax] = useState(10)
   const [currentUA, setCurrentUA] = useState('')
   const [payment, setPayment]   = useState<any>(null)
@@ -60,6 +63,21 @@ export default function BrowserPage() {
     })
     window.zap?.getBlockedCount().then(setBlocked)
     return () => window.removeEventListener('favorites-updated', loadFavBar)
+  }, [])
+
+  useEffect(() => {
+    const closeFavContext = () => setFavContext(null)
+    const closeFavContextOnEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFavContext(null)
+    }
+
+    window.addEventListener('click', closeFavContext)
+    window.addEventListener('keydown', closeFavContextOnEsc)
+
+    return () => {
+      window.removeEventListener('click', closeFavContext)
+      window.removeEventListener('keydown', closeFavContextOnEsc)
+    }
   }, [])
 
   // Dynamic bookmarks bar capacity
@@ -690,11 +708,8 @@ export default function BrowserPage() {
         })
 
         const createFolderInBar = async () => {
-          console.log('[FavBar] createFolderInBar called')
-          const title = 'Nuova cartella'
-
-          await window.zap?.addFavorite({
-            title,
+          const created = await window.zap?.addFavorite({
+            title: 'New folder',
             url: '',
             favicon: null,
             parent_id: barRootId,
@@ -705,6 +720,16 @@ export default function BrowserPage() {
           const f = await window.zap?.getFavorites()
           setFavBar(f || [])
           window.dispatchEvent(new Event('favorites-updated'))
+
+          const createdId = created?.id
+          const createdFolder = createdId
+            ? (f || []).find((item:any) => item.id === createdId)
+            : null
+
+          if (createdFolder) {
+            setFavRename(createdFolder)
+            setFavRenameValue(createdFolder.title || 'New folder')
+          }
         }
 
         const visible = barItems.slice(0, favBarMax)
@@ -776,14 +801,20 @@ export default function BrowserPage() {
         return (
           <div
             data-zap-favbar="1"
-            onContextMenuCapture={(e) => {
-              console.log('[FavBar] context menu capture', e.target)
+            onContextMenu={(e) => {
+              const target = e.target as HTMLElement
+              if (target.closest('[data-zap-favitem="1"]')) return
+
               e.preventDefault()
               e.stopPropagation()
-              createFolderInBar()
-            }}
-            onContextMenu={(e) => {
-              console.log('[FavBar] context menu bubble', e.target)
+              setFavContext({
+                x: e.clientX,
+                y: e.clientY,
+                item: null,
+                type: 'bar'
+              })
+              setFavFolderOpen(null)
+              setFavDropOpen(false)
             }}
             style={{
               display:'flex', alignItems:'center', gap:2,
@@ -819,7 +850,20 @@ export default function BrowserPage() {
               return (
                 <div key={f.id} style={{ position:'relative', flexShrink:0 }}>
                   <button
+                    data-zap-favitem="1"
                     onClick={() => openFav(f)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setFavContext({
+                        x: e.clientX,
+                        y: e.clientY,
+                        item: f,
+                        type: isFolder ? 'folder' : 'bookmark'
+                      })
+                      setFavFolderOpen(null)
+                      setFavDropOpen(false)
+                    }}
                     onMouseDown={(e) => {
                       if (!isFolder && e.button === 1) {
                         e.preventDefault()
@@ -863,6 +907,168 @@ export default function BrowserPage() {
                 </div>
               )
             })}
+
+            {favContext && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position:'fixed',
+                  top:favContext.y,
+                  left:favContext.x,
+                  zIndex:10000,
+                  minWidth:190,
+                  background:'var(--bg-1)',
+                  border:'1px solid var(--b1)',
+                  borderRadius:'var(--r-md)',
+                  boxShadow:'0 8px 32px rgba(0,0,0,.45)',
+                  padding:'4px 0',
+                  color:'var(--t0)',
+                  fontSize:12,
+                }}
+              >
+                {favContext.item && Number(favContext.item.is_folder) !== 1 && (
+                  <button
+                    onClick={() => {
+                      handleNewTab(favContext.item.url)
+                      setFavContext(null)
+                    }}
+                    style={{display:'block',width:'100%',textAlign:'left',padding:'7px 12px',background:'none',border:'none',color:'var(--t0)',cursor:'pointer'}}
+                  >Open in new tab</button>
+                )}
+
+                {favContext.item && Number(favContext.item.is_folder) !== 1 && (
+                  <button
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(favContext.item.url || '') } catch (_) {}
+                      setFavContext(null)
+                    }}
+                    style={{display:'block',width:'100%',textAlign:'left',padding:'7px 12px',background:'none',border:'none',color:'var(--t0)',cursor:'pointer'}}
+                  >Copy URL</button>
+                )}
+
+                {favContext.item && (
+                  <button
+                    onClick={() => {
+                      setFavRename(favContext.item)
+                      setFavRenameValue(favContext.item.title || '')
+                      setFavContext(null)
+                    }}
+                    style={{display:'block',width:'100%',textAlign:'left',padding:'7px 12px',background:'none',border:'none',color:'var(--t0)',cursor:'pointer'}}
+                  >Rename</button>
+                )}
+
+                {favContext.item && (
+                  <button
+                    onClick={async () => {
+                      const isFolder = Number(favContext.item.is_folder) === 1
+                      const name = favContext.item.title || (isFolder ? 'this folder' : 'this bookmark')
+                      const ok = window.confirm(
+                        isFolder
+                          ? `Delete folder "${name}" and all its contents?`
+                          : `Delete bookmark "${name}"?`
+                      )
+                      if (!ok) {
+                        setFavContext(null)
+                        return
+                      }
+                      await window.zap?.removeFavorite({ id: favContext.item.id })
+                      const f = await window.zap?.getFavorites()
+                      setFavBar(f || [])
+                      window.dispatchEvent(new Event('favorites-updated'))
+                      setFavContext(null)
+                    }}
+                    style={{display:'block',width:'100%',textAlign:'left',padding:'7px 12px',background:'none',border:'none',color:'#ff6b6b',cursor:'pointer'}}
+                  >Delete</button>
+                )}
+
+                {!favContext.item && (
+                  <button
+                    onClick={async () => {
+                      await createFolderInBar()
+                      setFavContext(null)
+                    }}
+                    style={{display:'block',width:'100%',textAlign:'left',padding:'7px 12px',background:'none',border:'none',color:'var(--t0)',cursor:'pointer'}}
+                  >New folder</button>
+                )}
+              </div>
+            )}
+
+            {favRename && (
+              <div
+                style={{
+                  position:'fixed',
+                  inset:0,
+                  zIndex:11000,
+                  background:'rgba(0,0,0,.45)',
+                  display:'flex',
+                  alignItems:'center',
+                  justifyContent:'center',
+                }}
+                onClick={() => setFavRename(null)}
+              >
+                <div
+                  style={{
+                    width:360,
+                    background:'var(--bg-1)',
+                    border:'1px solid var(--b1)',
+                    borderRadius:'var(--r-lg)',
+                    boxShadow:'0 12px 40px rgba(0,0,0,.5)',
+                    padding:16,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>
+                    Rename {Number(favRename.is_folder) === 1 ? 'folder' : 'bookmark'}
+                  </div>
+
+                  <input
+                    autoFocus
+                    value={favRenameValue}
+                    onChange={(e) => setFavRenameValue(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Escape') setFavRename(null)
+                      if (e.key === 'Enter' && favRenameValue.trim()) {
+                        await window.zap?.renameFavorite({ id: favRename.id, title: favRenameValue.trim() })
+                        const f = await window.zap?.getFavorites()
+                        setFavBar(f || [])
+                        window.dispatchEvent(new Event('favorites-updated'))
+                        setFavRename(null)
+                      }
+                    }}
+                    style={{
+                      width:'100%',
+                      boxSizing:'border-box',
+                      background:'var(--bg-2)',
+                      color:'var(--t0)',
+                      border:'1px solid var(--b1)',
+                      borderRadius:'var(--r-md)',
+                      padding:'9px 10px',
+                      fontSize:13,
+                      outline:'none',
+                    }}
+                  />
+
+                  <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:14}}>
+                    <button
+                      onClick={() => setFavRename(null)}
+                      style={{padding:'7px 12px',borderRadius:'var(--r-md)',border:'1px solid var(--b1)',background:'var(--bg-2)',color:'var(--t0)',cursor:'pointer'}}
+                    >Cancel</button>
+
+                    <button
+                      onClick={async () => {
+                        if (!favRenameValue.trim()) return
+                        await window.zap?.renameFavorite({ id: favRename.id, title: favRenameValue.trim() })
+                        const f = await window.zap?.getFavorites()
+                        setFavBar(f || [])
+                        window.dispatchEvent(new Event('favorites-updated'))
+                        setFavRename(null)
+                      }}
+                      style={{padding:'7px 12px',borderRadius:'var(--r-md)',border:'1px solid var(--a)',background:'var(--a)',color:'#fff',cursor:'pointer'}}
+                    >Save</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {hidden.length > 0 && (
               <div style={{ position:'relative', marginLeft:'auto', flexShrink:0 }}>

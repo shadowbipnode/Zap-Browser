@@ -63,8 +63,20 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     setTitle(''); setUrl(''); setAdd(false); load()
   }
 
-  const remove = async (id: number) => {
-    await (window as any).zap?.removeFavorite({ id }); load()
+  const remove = async (f: Fav) => {
+    const isFolder = !!f.is_folder
+    const name = f.title || (isFolder ? 'this folder' : 'this bookmark')
+
+    const confirmed = window.confirm(
+      isFolder
+        ? `Delete folder "${name}" and all its contents?`
+        : `Delete bookmark "${name}"?`
+    )
+
+    if (!confirmed) return
+
+    await (window as any).zap?.removeFavorite({ id: f.id })
+    load()
   }
 
   const startRename = (f: Fav) => {
@@ -132,7 +144,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
                 <div className="fav-url">Folder</div>
               </div>
               <button className="fav-rm"
-                onClick={e => { e.stopPropagation(); remove(f.id) }}>×</button>
+                onClick={e => { e.stopPropagation(); remove(f) }}>×</button>
             </div>,
             ...renderItems(f.id, depth + 1)
           ]
@@ -167,7 +179,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
               <div className="fav-url">{f.url}</div>
             </div>
             <button className="fav-rm"
-              onClick={e => { e.stopPropagation(); remove(f.id) }}>×</button>
+              onClick={e => { e.stopPropagation(); remove(f) }}>×</button>
           </div>
         ]
       })

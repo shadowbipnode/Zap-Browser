@@ -195,8 +195,41 @@ function addFavorite({ title, url, favicon, parent_id = null, is_folder = 0, sor
   }
 }
 function removeFavorite(id) {
-  db.prepare('DELETE FROM favorites WHERE id=?').run(id)
-  return { ok: true }
+  const item = db.prepare(`
+    SELECT id, is_folder
+    FROM favorites
+    WHERE id=?
+  `).get(id)
+
+  if (!item) return false
+
+  const deleteRecursive = (parentId) => {
+    const children = db.prepare(`
+      SELECT id
+      FROM favorites
+      WHERE parent_id=?
+    `).all(parentId)
+
+    for (const child of children) {
+      deleteRecursive(child.id)
+    }
+
+    db.prepare(`
+      DELETE FROM favorites
+      WHERE id=?
+    `).run(parentId)
+  }
+
+  if (item.is_folder) {
+    deleteRecursive(id)
+  } else {
+    db.prepare(`
+      DELETE FROM favorites
+      WHERE id=?
+    `).run(id)
+  }
+
+  return true
 }
 
 function updateFavoriteTitle(id, title) {
