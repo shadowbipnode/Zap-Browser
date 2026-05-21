@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld('zap', {
       'tab-updated', 'blocked-count', 'payment-detected', 'app-ready',
       'tab-switched', 'page-features', 'v4v-detected', 'blocklist-ready',
       'open-new-tab', 'tab-ready', 'popup-blocked',
+      'download-started', 'download-updated', 'download-done',
     ]
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
   },

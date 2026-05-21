@@ -751,6 +751,45 @@ function setupPrivacy(ses) {
   })
 }
 
+function setupDownloads(ses) {
+  ses.on('will-download', (_event, item) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const fileName = item.getFilename()
+    const totalBytes = item.getTotalBytes()
+
+    mainWindow?.webContents.send('download-started', {
+      id,
+      fileName,
+      totalBytes,
+      receivedBytes: 0,
+      state: 'progressing',
+      savePath: item.getSavePath(),
+    })
+
+    item.on('updated', (_event, state) => {
+      mainWindow?.webContents.send('download-updated', {
+        id,
+        fileName,
+        totalBytes,
+        receivedBytes: item.getReceivedBytes(),
+        state,
+        savePath: item.getSavePath(),
+      })
+    })
+
+    item.once('done', (_event, state) => {
+      mainWindow?.webContents.send('download-done', {
+        id,
+        fileName,
+        totalBytes,
+        receivedBytes: item.getReceivedBytes(),
+        state,
+        savePath: item.getSavePath(),
+      })
+    })
+  })
+}
+
 function createWindow() {
   DB.init()
   v4v.init(nwc)
@@ -769,6 +808,7 @@ function createWindow() {
   activeView = createMainView()
 
   setupPrivacy(session.defaultSession)
+  setupDownloads(session.defaultSession)
 
   bl.init((size) => {
     mainWindow?.webContents.send('blocklist-ready', { size })

@@ -50,6 +50,8 @@ export default function BrowserPage() {
   const [popupBlocked, setPopupBlocked] = useState<any>(null)
   const [paymentSuccess, setPaymentSuccess] = useState<any>(null)
   const [incomingPayment, setIncomingPayment] = useState<any>(null)
+  const [downloads, setDownloads] = useState<any[]>([])
+  const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
 
@@ -150,6 +152,20 @@ export default function BrowserPage() {
     window.zap?.on('popup-blocked', (data: any) => {
       setPopupBlocked(data || {})
       setTimeout(() => setPopupBlocked(null), 4500)
+    })
+
+    window.zap?.on('download-started', (data: any) => {
+      setDownloads(prev => [data, ...prev.filter(d => d.id !== data.id)])
+      setDownloadsOpen(true)
+    })
+
+    window.zap?.on('download-updated', (data: any) => {
+      setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
+    })
+
+    window.zap?.on('download-done', (data: any) => {
+      setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
+      setDownloadsOpen(true)
     })
 
     const onPaymentSuccess = (e: any) => {
@@ -729,6 +745,22 @@ export default function BrowserPage() {
           }}
         >
           ⭐
+        </button>
+
+        <button
+          title="Downloads"
+          onClick={() => setDownloadsOpen(v => !v)}
+          style={{
+            background:'none',
+            border:'none',
+            color: downloads.some(d => d.state === 'progressing') ? 'var(--a)' : 'var(--t2)',
+            cursor:'pointer',
+            fontSize:15,
+            padding:'0 8px',
+            flexShrink:0,
+          }}
+        >
+          ⬇
         </button>
 
         {/* Panel buttons */}
@@ -1584,6 +1616,80 @@ export default function BrowserPage() {
       )}
 
       {/* ── Payment popup ─────────────────────────────────────────────── */}
+      {downloadsOpen && (
+        <div style={{
+          position:'fixed',
+          top:74,
+          right:18,
+          zIndex:999999,
+          width:360,
+          maxHeight:420,
+          overflowY:'auto',
+          background:'var(--bg-1)',
+          border:'1px solid var(--b1)',
+          borderRadius:'var(--r-lg)',
+          boxShadow:'0 18px 50px rgba(0,0,0,.55)',
+          padding:12,
+          color:'var(--t0)',
+          fontFamily:'var(--ff)',
+        }}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+            <div style={{fontSize:14,fontWeight:800}}>Downloads</div>
+            <button
+              onClick={() => setDownloadsOpen(false)}
+              style={{background:'none',border:'none',color:'var(--t2)',cursor:'pointer',fontSize:16}}
+            >×</button>
+          </div>
+
+          {downloads.length === 0 ? (
+            <div style={{fontSize:12,color:'var(--t2)'}}>No downloads yet</div>
+          ) : downloads.map((d:any) => {
+            const pct = d.totalBytes > 0
+              ? Math.min(100, Math.round((d.receivedBytes / d.totalBytes) * 100))
+              : 0
+
+            return (
+              <div key={d.id} style={{
+                padding:'9px 0',
+                borderTop:'1px solid var(--b0)',
+              }}>
+                <div style={{fontSize:12,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {d.fileName}
+                </div>
+
+                <div style={{fontSize:10,color:'var(--t2)',marginTop:3}}>
+                  {d.state === 'completed'
+                    ? 'Completed'
+                    : d.state === 'cancelled'
+                      ? 'Cancelled'
+                      : `${pct}%`}
+                </div>
+
+                <div style={{
+                  height:5,
+                  background:'var(--bg-3)',
+                  borderRadius:999,
+                  marginTop:6,
+                  overflow:'hidden',
+                }}>
+                  <div style={{
+                    width:`${d.state === 'completed' ? 100 : pct}%`,
+                    height:'100%',
+                    background:'var(--a)',
+                  }} />
+                </div>
+
+                {d.savePath && (
+                  <div style={{fontSize:10,color:'var(--t2)',marginTop:5,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                    {d.savePath}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {payment && (
         <div className="inv-popup">
           <span className="inv-ico">
