@@ -13,6 +13,13 @@ const cashu  = require('./cashu')
 const lnurl  = require('./lnurl')
 const V = require('./validate')
 
+const {
+  SHELL_H,
+  showView,
+  hideView,
+  resizeView,
+} = require('./browser/viewManager')
+
 const isDev = !app.isPackaged
 const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
@@ -22,8 +29,6 @@ const tabUrls   = new Map()
 let activeTabId = null
 let isSwitching = false
 
-// Shell height: titlebar(32) + tabbar(36) + toolbar(46) + bookmarks bar(28)
-const SHELL_H = 142
 
 const UA_POOL = [
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -625,20 +630,9 @@ function createMainView() {
   return view
 }
 
-function showView() {
-  if (!mainWindow || !activeView) return
-  if (!mainWindow.getBrowserViews().includes(activeView)) {
-    mainWindow.addBrowserView(activeView)
-  }
-  const { width, height } = mainWindow.getBounds()
-  activeView.setBounds({ x: 0, y: SHELL_H, width, height: height - SHELL_H })
-  activeView.setAutoResize({ width: true, height: true })
-}
 
-function hideView() {
-  if (!mainWindow || !activeView) return
-  try { mainWindow.removeBrowserView(activeView) } catch (_) {}
-}
+
+
 
 function setupPrivacy(ses) {
   ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, cb) => {
@@ -728,7 +722,7 @@ function createWindow() {
   })
 
   mainWindow.on('resize', () => {
-    if (activeTabId && tabUrls.get(activeTabId)) showView()
+    if (activeTabId && tabUrls.get(activeTabId)) showView(mainWindow, activeView)
   })
 
   if (isDev) {
@@ -775,7 +769,7 @@ ipcMain.handle('open-in-new-tab', (_, { url }) => {
 ipcMain.handle('tab-create', (_, { tabId }) => {
   tabUrls.set(tabId, '')
   activeTabId = tabId
-  showView()
+  showView(mainWindow, activeView)
   activeView.webContents.loadURL('about:blank').catch(() => {})
   return { ok: true }
 })
@@ -784,7 +778,7 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
   activeTabId = tabId
   const url = tabUrls.get(tabId) || ''
   if (url && url !== 'zap://newtab') {
-    showView()
+    showView(mainWindow, activeView)
     const current = activeView.webContents.getURL()
     if (current !== url) {
       isSwitching = true
@@ -793,7 +787,7 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
         .finally(() => { isSwitching = false })
     }
   } else {
-    hideView()
+    hideView(mainWindow, activeView)
   }
   return { ok: true }
 })
@@ -808,7 +802,7 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   }
   activeTabId = tabId
   tabUrls.set(tabId, u)
-  showView()
+  showView(mainWindow, activeView)
   await new Promise(r => setTimeout(r, 50))
   activeView.webContents.loadURL(u).catch(() => {})
   return { ok: true, url: u }
@@ -816,14 +810,14 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
 
 ipcMain.handle('tab-close', (_, { tabId }) => {
   tabUrls.delete(tabId)
-  if (activeTabId === tabId) { hideView(); activeTabId = null }
+  if (activeTabId === tabId) { hideView(mainWindow, activeView); activeTabId = null }
   return { ok: true }
 })
 
 ipcMain.handle('tab-home', (_, { tabId }) => {
   activeTabId = tabId
   tabUrls.set(tabId, '')
-  hideView()
+  hideView(mainWindow, activeView)
   return { ok: true }
 })
 
@@ -832,18 +826,8 @@ ipcMain.handle('tab-go-forward', () => activeView?.webContents.goForward())
 ipcMain.handle('tab-reload',   () => activeView?.webContents.reload())
 
 ipcMain.handle('shell-resize', (_, args) => {
-  if (!activeTabId || !tabUrls.get(activeTabId) || !mainWindow || !activeView) return
-
-  const { width, height } = mainWindow.getBounds()
-
-  const suggestionsOffset = args?.suggestionsOpen ? 320 : 0
-
-  activeView.setBounds({
-    x: 0,
-    y: SHELL_H + suggestionsOffset,
-    width: width - (args?.panelOpen ? 320 : 0),
-    height: height - SHELL_H - suggestionsOffset,
-  })
+  if (!activeTabId || !tabUrls.get(activeTabId)) return
+  resizeView(mainWindow, activeView, args)
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────
