@@ -400,6 +400,35 @@ function createMainView() {
           }
         }
 
+        function zapHideBottomPromoBanners() {
+          const promoRegex = /(abbonati|abbonamento|offerta|promo|scopri di più|buono regalo|amazon|subscribe|subscription|limited offer|sponsor|advert)/i
+
+          document.querySelectorAll('body > div, body > section, body > aside').forEach(el => {
+            const st = window.getComputedStyle(el)
+            const r = el.getBoundingClientRect()
+            const txt = String(el.innerText || el.textContent || '').slice(0, 600)
+
+            const isFixedOrSticky =
+              st.position === 'fixed' ||
+              st.position === 'sticky'
+
+            const isBottomBanner =
+              isFixedOrSticky &&
+              r.width >= window.innerWidth * 0.55 &&
+              r.height >= 70 &&
+              r.height <= window.innerHeight * 0.38 &&
+              r.bottom >= window.innerHeight - 8
+
+            if (isBottomBanner && promoRegex.test(txt)) {
+              el.style.setProperty('display', 'none', 'important')
+              el.style.setProperty('visibility', 'hidden', 'important')
+              el.style.setProperty('height', '0px', 'important')
+              el.style.setProperty('max-height', '0px', 'important')
+              el.style.setProperty('overflow', 'hidden', 'important')
+            }
+          })
+        }
+
         function zapKillAdElements() {
           const adRegex = /(googlesyndication|doubleclick|googleads|adform|adnxs|criteo|taboola|outbrain|mgid|teads|smartadserver|openx|rubicon|yieldlove|prebid|adsbygoogle|pubblicit|sponsor)/i;
 
@@ -566,29 +595,33 @@ function createMainView() {
 
           const hasPaywall = zapHasPaywallFramework();
 
-          zapKillAdSkins();
+          // Disabled in Balanced Shields mode
+          // zapKillAdSkins();
           zapKillAdElements();
-          zapKillAdImagesAndLinks();
+          zapHideBottomPromoBanners();
+          // Fully disabled in Balanced Shields v0.4
 
           if (hasPaywall) {
-            document.body.style.overflow = '';
-            document.documentElement.style.overflow = '';
+            // Balanced Shields: avoid global overflow reset
+            // Balanced Shields: avoid global overflow reset
             return;
           }
 
           const selectors = [
-            '[class*="overlay"]',
-            '[id*="overlay"]',
-            '[class*="modal"]',
-            '[id*="modal"]',
-            '[class*="popup"]',
-            '[id*="popup"]',
+            
+            
+            
+            
+            
+            
             '[class*="interstitial"]',
             '[id*="interstitial"]',
+            '[class*="cookie"]',
+            '[id*="cookie"]',
             '[class*="advert"]',
             '[id*="advert"]',
-            '[class*="banner"]',
-            '[id*="banner"]',
+            
+            
             '[class*="adv"]',
             '[id*="adv"]',
             '[class*="sponsor"]',
@@ -608,13 +641,14 @@ function createMainView() {
                 z >= 5;
 
               if (coversScreen) {
-                el.remove();
+                el.style.setProperty('display', 'none', 'important');
+                el.style.setProperty('visibility', 'hidden', 'important');
               }
             });
           }
 
-          document.body.style.overflow = '';
-          document.documentElement.style.overflow = '';
+          // Balanced Shields: avoid global overflow reset
+          // Balanced Shields: avoid global overflow reset
         }
 
         if (location.hostname.includes('cittadellaspezia')) {
@@ -667,9 +701,7 @@ function createMainView() {
 
           window.__zapOverlayObserver.observe(document.documentElement, {
             childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ['style', 'class']
+            subtree: true
           });
         }
       })();
