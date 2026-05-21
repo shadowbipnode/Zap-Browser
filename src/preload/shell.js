@@ -91,6 +91,9 @@ contextBridge.exposeInMainWorld('zap', {
   getAppVersion:    () => ipcRenderer.invoke('get-app-version'),
   checkForUpdates:  () => ipcRenderer.invoke('check-for-updates'),
   openReleasesPage: () => ipcRenderer.invoke('open-releases-page'),
+  cancelDownload: (a) => ipcRenderer.invoke('download-cancel', a),
+  openDownload: (a) => ipcRenderer.invoke('download-open', a),
+  showDownloadInFolder: (a) => ipcRenderer.invoke('download-show-folder', a),
 
   // Data management
   resetBrowser: () => ipcRenderer.invoke('reset-browser'),

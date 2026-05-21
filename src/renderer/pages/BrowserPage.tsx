@@ -6,9 +6,10 @@ import NostrPanel     from '../components/nostr/NostrPanel'
 import FavoritesPanel from '../components/browser/FavoritesPanel'
 import SettingsPanel  from '../components/settings/SettingsPanel'
 import NewTabPage     from '../components/browser/NewTabPage'
+import DownloadsPanel from '../components/browser/DownloadsPanel'
 import { useLang } from '../useLang'
 
-export type Panel = 'wallet'|'nostr'|'favorites'|'settings'|null
+export type Panel = 'wallet'|'nostr'|'favorites'|'settings'|'downloads'|null
 
 interface TabState {
   title?: string; url?: string; loading?: boolean
@@ -749,7 +750,7 @@ export default function BrowserPage() {
 
         <button
           title="Downloads"
-          onClick={() => setDownloadsOpen(v => !v)}
+          onClick={() => setPanel(panel === 'downloads' ? null : 'downloads')}
           style={{
             background:'none',
             border:'none',
@@ -1470,6 +1471,7 @@ export default function BrowserPage() {
             {panel === 'nostr'     && <NostrPanel     onClose={() => setPanel(null)} />}
             {panel === 'favorites' && <FavoritesPanel onClose={() => setPanel(null)} onNavigate={handleNavigate} onOpenNewTab={handleNewTab} currentUrl={activeTab?.url||''} currentTitle={activeTab?.title||''} />}
             {panel === 'settings'  && <SettingsPanel  onClose={() => setPanel(null)} />}
+            {panel === 'downloads' && <DownloadsPanel downloads={downloads} onClose={() => setPanel(null)} />}
           </div>
         )}
       </div>
@@ -1616,80 +1618,6 @@ export default function BrowserPage() {
       )}
 
       {/* ── Payment popup ─────────────────────────────────────────────── */}
-      {downloadsOpen && (
-        <div style={{
-          position:'fixed',
-          top:74,
-          right:18,
-          zIndex:999999,
-          width:360,
-          maxHeight:420,
-          overflowY:'auto',
-          background:'var(--bg-1)',
-          border:'1px solid var(--b1)',
-          borderRadius:'var(--r-lg)',
-          boxShadow:'0 18px 50px rgba(0,0,0,.55)',
-          padding:12,
-          color:'var(--t0)',
-          fontFamily:'var(--ff)',
-        }}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
-            <div style={{fontSize:14,fontWeight:800}}>Downloads</div>
-            <button
-              onClick={() => setDownloadsOpen(false)}
-              style={{background:'none',border:'none',color:'var(--t2)',cursor:'pointer',fontSize:16}}
-            >×</button>
-          </div>
-
-          {downloads.length === 0 ? (
-            <div style={{fontSize:12,color:'var(--t2)'}}>No downloads yet</div>
-          ) : downloads.map((d:any) => {
-            const pct = d.totalBytes > 0
-              ? Math.min(100, Math.round((d.receivedBytes / d.totalBytes) * 100))
-              : 0
-
-            return (
-              <div key={d.id} style={{
-                padding:'9px 0',
-                borderTop:'1px solid var(--b0)',
-              }}>
-                <div style={{fontSize:12,fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                  {d.fileName}
-                </div>
-
-                <div style={{fontSize:10,color:'var(--t2)',marginTop:3}}>
-                  {d.state === 'completed'
-                    ? 'Completed'
-                    : d.state === 'cancelled'
-                      ? 'Cancelled'
-                      : `${pct}%`}
-                </div>
-
-                <div style={{
-                  height:5,
-                  background:'var(--bg-3)',
-                  borderRadius:999,
-                  marginTop:6,
-                  overflow:'hidden',
-                }}>
-                  <div style={{
-                    width:`${d.state === 'completed' ? 100 : pct}%`,
-                    height:'100%',
-                    background:'var(--a)',
-                  }} />
-                </div>
-
-                {d.savePath && (
-                  <div style={{fontSize:10,color:'var(--t2)',marginTop:5,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                    {d.savePath}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
       {payment && (
         <div className="inv-popup">
           <span className="inv-ico">

@@ -28,6 +28,7 @@ let activeView  = null
 const tabUrls   = new Map()
 let activeTabId = null
 let isSwitching = false
+const activeDownloads = new Map()
 
 
 const UA_POOL = [
@@ -770,6 +771,8 @@ function setupDownloads(ses) {
     const fileName = item.getFilename()
     const totalBytes = item.getTotalBytes()
 
+    activeDownloads.set(id, item)
+
     mainWindow?.webContents.send('download-started', {
       id,
       fileName,
@@ -791,6 +794,8 @@ function setupDownloads(ses) {
     })
 
     item.once('done', (_event, state) => {
+      activeDownloads.delete(id)
+
       mainWindow?.webContents.send('download-done', {
         id,
         fileName,
@@ -934,6 +939,32 @@ ipcMain.handle('tab-reload',   () => activeView?.webContents.reload())
 ipcMain.handle('shell-resize', (_, args) => {
   if (!activeTabId || !tabUrls.get(activeTabId)) return
   resizeView(mainWindow, activeView, args)
+})
+
+ipcMain.handle('download-cancel', (_, { id }) => {
+  V.assert(typeof id === 'string' && id.length > 0 && id.length <= 200, 'Invalid download id')
+
+  const item = activeDownloads.get(id)
+  if (!item) return { ok: false, error: 'Download not found or already finished' }
+
+  try {
+    item.cancel()
+    activeDownloads.delete(id)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Cancel failed' }
+  }
+})
+
+ipcMain.handle('download-open', async (_, { path: filePath }) => {
+  V.assert(typeof filePath === 'string' && filePath.length > 0 && filePath.length <= 5000, 'Invalid download path')
+  return shell.openPath(filePath)
+})
+
+ipcMain.handle('download-show-folder', (_, { path: filePath }) => {
+  V.assert(typeof filePath === 'string' && filePath.length > 0 && filePath.length <= 5000, 'Invalid download path')
+  shell.showItemInFolder(filePath)
+  return { ok: true }
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────
