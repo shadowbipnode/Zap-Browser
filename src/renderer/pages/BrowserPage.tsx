@@ -386,7 +386,37 @@ export default function BrowserPage() {
 
     const v = addrVal.trim()
 
-    if (v.toLowerCase().startsWith('lnbc') || v.toLowerCase().startsWith('lntb')) {
+    const lower = v.toLowerCase()
+
+    if (lower.startsWith('lightning:')) {
+      const payload = v.slice('lightning:'.length).trim()
+      setPayment({
+        type: payload.toLowerCase().startsWith('lnbc') || payload.toLowerCase().startsWith('lntb')
+          ? 'invoice'
+          : payload.toLowerCase().startsWith('lnurl')
+            ? 'lnurl'
+            : 'lightning',
+        value: payload
+      })
+      return
+    }
+
+    if (lower.startsWith('cashu:')) {
+      setPayment({ type: 'cashu', value: v.slice('cashu:'.length).trim() || v })
+      return
+    }
+
+    if (lower.startsWith('liquid:') || lower.startsWith('l-btc:')) {
+      setPayment({ type: 'liquid', value: v })
+      return
+    }
+
+    if (lower.startsWith('lnurl:') || lower.startsWith('lnurlp:') || lower.startsWith('lnurlw:')) {
+      setPayment({ type: 'lnurl', value: v.replace(/^lnurl:/i, '') })
+      return
+    }
+
+    if (lower.startsWith('lnbc') || lower.startsWith('lntb')) {
       setPayment({ type: 'invoice', value: v })
       return
     }
@@ -1556,14 +1586,47 @@ export default function BrowserPage() {
       {/* ── Payment popup ─────────────────────────────────────────────── */}
       {payment && (
         <div className="inv-popup">
-          <span className="inv-ico">{payment.type === 'invoice' ? '⚡' : '🥜'}</span>
+          <span className="inv-ico">
+            {payment.type === 'invoice' ? '⚡'
+              : payment.type === 'cashu' ? '🥜'
+              : payment.type === 'lnurl' ? '🔗'
+              : payment.type === 'liquid' ? '💧'
+              : '⚡'}
+          </span>
+
           <div className="inv-body">
-            <div className="inv-type">{payment.type === 'invoice' ? 'Lightning Invoice' : 'Cashu Token'}</div>
-            {payment.amount && <div className="inv-sats">{payment.amount.toLocaleString()} sats</div>}
+            <div className="inv-type">
+              {payment.type === 'invoice' ? 'Lightning Invoice'
+                : payment.type === 'cashu' ? 'Cashu Token'
+                : payment.type === 'lnurl' ? 'LNURL Request'
+                : payment.type === 'liquid' ? 'Liquid / L-BTC'
+                : 'Lightning Request'}
+            </div>
+
+            {payment.amount && (
+              <div className="inv-sats">{payment.amount.toLocaleString()} sats</div>
+            )}
+
+            {payment.type !== 'invoice' && payment.type !== 'cashu' && (
+              <div style={{fontSize:11,color:'var(--t2)',marginTop:2}}>
+                Detected, wallet flow coming soon
+              </div>
+            )}
           </div>
-          <button className="inv-pay" onClick={handlePay} disabled={paying}>
-            {paying ? '...' : payment.type === 'invoice' ? 'Paga ⚡' : 'Ricevi 🥜'}
-          </button>
+
+          {(payment.type === 'invoice' || payment.type === 'cashu') ? (
+            <button className="inv-pay" onClick={handlePay} disabled={paying}>
+              {paying ? '...' : payment.type === 'invoice' ? 'Paga ⚡' : 'Ricevi 🥜'}
+            </button>
+          ) : (
+            <button
+              className="inv-pay"
+              onClick={() => setPayment(null)}
+            >
+              OK
+            </button>
+          )}
+
           <button className="inv-dismiss" onClick={() => setPayment(null)}>✕</button>
         </div>
       )}

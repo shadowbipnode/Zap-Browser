@@ -151,6 +151,52 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
   return false
 }
 
+function parseNativePaymentUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null
+
+  const value = rawUrl.trim()
+  const lower = value.toLowerCase()
+
+  if (lower.startsWith('lightning:')) {
+    const payload = value.slice('lightning:'.length).trim()
+    if (!payload) return null
+
+    if (payload.toLowerCase().startsWith('lnbc') || payload.toLowerCase().startsWith('lntb')) {
+      return { type: 'invoice', value: payload, source: 'protocol' }
+    }
+
+    if (payload.toLowerCase().startsWith('lnurl')) {
+      return { type: 'lnurl', value: payload, source: 'protocol' }
+    }
+
+    return { type: 'lightning', value: payload, source: 'protocol' }
+  }
+
+  if (lower.startsWith('cashu:')) {
+    const payload = value.slice('cashu:'.length).trim()
+    return { type: 'cashu', value: payload || value, source: 'protocol' }
+  }
+
+  if (lower.startsWith('cashua')) {
+    return { type: 'cashu', value, source: 'protocol' }
+  }
+
+  if (lower.startsWith('liquid:') || lower.startsWith('l-btc:')) {
+    return { type: 'liquid', value, source: 'protocol' }
+  }
+
+  if (lower.startsWith('lnurl:')) {
+    const payload = value.slice('lnurl:'.length).trim()
+    return { type: 'lnurl', value: payload || value, source: 'protocol' }
+  }
+
+  if (lower.startsWith('lnurlp:') || lower.startsWith('lnurlw:')) {
+    return { type: 'lnurl', value, source: 'protocol' }
+  }
+
+  return null
+}
+
 function createMainView() {
   const view = new BrowserView({
     webPreferences: {
@@ -216,6 +262,13 @@ function createMainView() {
   // Same-origin links may open in the current tab.
   // Cross-origin windows are usually popups/popunders/interstitial ads and are blocked.
   view.webContents.setWindowOpenHandler(({ url, disposition }) => {
+    const nativePayment = parseNativePaymentUrl(url)
+
+    if (nativePayment) {
+      mainWindow?.webContents.send('payment-detected', nativePayment)
+      return { action: 'deny' }
+    }
+
     const priv = DB.getPrivacy()
     if (!priv.adblock) {
       view.webContents.loadURL(url)
