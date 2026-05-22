@@ -1241,13 +1241,13 @@ ipcMain.on('address-suggestion-selected', (_event, url) => {
   mainWindow?.webContents.send('address-suggestion-picked', { url })
 })
 
-ipcMain.handle('show-bookmark-context-menu', (_, bookmark) => {
-  showBookmarkContextMenu({
+ipcMain.handle('show-bookmark-context-menu', async (_, bookmark) => {
+  const action = await showBookmarkContextMenu({
     mainWindow,
     bookmark,
   })
 
-  return { ok: true }
+  return { ok: true, action }
 })
 
 ipcMain.handle('show-bookmark-folder-popup', (_, args) => {
@@ -1268,6 +1268,21 @@ ipcMain.handle('hide-bookmark-folder-popup', () => {
 ipcMain.on('bookmark-folder-popup-picked', (_event, item) => {
   hideBookmarkFolderPopup()
   mainWindow?.webContents.send('bookmark-folder-picked', item)
+})
+
+ipcMain.on('bookmark-folder-popup-open-new-tab', (_event, url) => {
+  hideBookmarkFolderPopup()
+
+  if (!url || typeof url !== 'string') return
+
+  mainWindow?.webContents.send('bookmark-open-new-tab', { url })
+})
+
+ipcMain.on('bookmark-folder-popup-context-menu', (_event, bookmark) => {
+  showBookmarkContextMenu({
+    mainWindow,
+    bookmark,
+  })
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────

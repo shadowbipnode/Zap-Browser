@@ -25,6 +25,7 @@ export default function BrowserPage() {
   const [uaDrop, setUaDrop]     = useState(false)
   const [blocked,  setBlocked]   = useState(0)
   const [favBar,      setFavBar]    = useState<any[]>([])
+  const favBarRootIdRef = useRef<any>(null)
   const [showFavBar,  setShowFavBar] = useState(() => localStorage.getItem('showFavBar') !== 'false')
   const [favDropOpen, setFavDropOpen] = useState(false)
   const [favFolderOpen, setFavFolderOpen] = useState<any>(null)
@@ -181,7 +182,20 @@ export default function BrowserPage() {
     })
 
     window.zap?.on('bookmark-open-new-tab', (bookmark: any) => {
-      if (bookmark?.url) handleNewTab(bookmark.url)
+      if (!bookmark?.url) return
+
+      const now = Date.now()
+      const w = window as any
+      const key = `bookmark-open:${bookmark.url}`
+
+      if (w.__zapLastBookmarkActionKey === key && now - (w.__zapLastBookmarkActionAt || 0) < 1200) {
+        return
+      }
+
+      w.__zapLastBookmarkActionKey = key
+      w.__zapLastBookmarkActionAt = now
+
+      handleNewTab(bookmark.url)
     })
 
     window.zap?.on('bookmark-rename', (bookmark: any) => {
@@ -192,23 +206,40 @@ export default function BrowserPage() {
     window.zap?.on('bookmark-delete', async (bookmark: any) => {
       if (!bookmark?.id) return
 
-      const isFolder = Number(bookmark.is_folder) === 1
-      const name = bookmark.title || (isFolder ? 'this folder' : 'this bookmark')
+      const w = window as any
+      const key = `bookmark-delete:${bookmark.id}`
 
-      const ok = window.confirm(
-        isFolder
-          ? `Delete folder "${name}" and all its contents?`
-          : `Delete bookmark "${name}"?`
-      )
+      if (w.__zapBookmarkDeleteInProgress === key) {
+        return
+      }
 
-      if (!ok) return
+      w.__zapBookmarkDeleteInProgress = key
 
-      await window.zap?.removeFavorite({ id: bookmark.id })
+      try {
+        const isFolder = Number(bookmark.is_folder) === 1
+        const name = bookmark.title || (isFolder ? 'this folder' : 'this bookmark')
 
-      const f = await window.zap?.getFavorites()
-      setFavBar(f || [])
+        const ok = window.confirm(
+          isFolder
+            ? `Delete folder "${name}" and all its contents?`
+            : `Delete bookmark "${name}"?`
+        )
 
-      window.dispatchEvent(new Event('favorites-updated'))
+        if (!ok) return
+
+        await window.zap?.removeFavorite({ id: Number(bookmark.id) })
+
+        const f = await window.zap?.getFavorites()
+        setFavBar(f || [])
+
+        window.dispatchEvent(new Event('favorites-updated'))
+      } finally {
+        setTimeout(() => {
+          if (w.__zapBookmarkDeleteInProgress === key) {
+            w.__zapBookmarkDeleteInProgress = null
+          }
+        }, 800)
+      }
     })
 
     window.zap?.on('bookmark-folder-picked', (item: any) => {
@@ -218,6 +249,29 @@ export default function BrowserPage() {
 
       window.zap?.hideBookmarkFolderPopup?.()
       handleNavigate(url)
+    })
+
+    window.zap?.on('bookmark-create-folder-request', async (data: any) => {
+      console.log('[DEBUG][renderer] bookmark-create-folder-request received', data)
+      console.log('[BookmarksBar] create folder request received')
+
+      const title = window.prompt('Folder name', 'New folder')
+      if (!title?.trim()) return
+
+      const rootId = favBarRootIdRef.current ?? barRootId ?? null
+
+      await window.zap?.addFavorite({
+        title: title.trim(),
+        url: '',
+        favicon: null,
+        parent_id: rootId,
+        is_folder: 1,
+        sort_order: Date.now(),
+      })
+
+      const f = await window.zap?.getFavorites()
+      setFavBar(f || [])
+      window.dispatchEvent(new Event('favorites-updated'))
     })
 
     const onPaymentSuccess = (e: any) => {
@@ -1020,7 +1074,12 @@ export default function BrowserPage() {
                     const folderName = bookmarkNewFolderName.trim()
                     if (!folderName) return
 
-                    const created = await window.zap?.addFavorite({
+                    console.log('[FavBar] creating folder', {
+            ref: favBarRootIdRef.current,
+            root: barRootId,
+          })
+
+          const created = await window.zap?.addFavorite({
                       title: folderName,
                       url: '',
                       favicon: null,
@@ -1095,27 +1154,54 @@ export default function BrowserPage() {
         })
 
         const createFolderInBar = async () => {
-          const created = await window.zap?.addFavorite({
-            title: 'New folder',
-            url: '',
-            favicon: null,
-            parent_id: barRootId,
-            is_folder: 1,
-            sort_order: Date.now()
-          })
+          try {
+            console.log('[FavBar] plus/create folder clicked')
 
-          const f = await window.zap?.getFavorites()
-          setFavBar(f || [])
-          window.dispatchEvent(new Event('favorites-updated'))
+            let rootId = favBarRootIdRef.current ?? barRootId ?? null
 
-          const createdId = created?.id
-          const createdFolder = createdId
-            ? (f || []).find((item:any) => item.id === createdId)
-            : null
+            // If the bookmarks bar root is missing, create it once.
+            if (!rootId) {
+              const root = await window.zap?.addFavorite({
+                title: 'Bookmarks Bar',
+                url: '',
+                favicon: null,
+                parent_id: null,
+                is_folder: 1,
+                sort_order: 0,
+              })
 
-          if (createdFolder) {
-            setFavRename(createdFolder)
-            setFavRenameValue(createdFolder.title || 'New folder')
+              rootId = root?.id ?? null
+              favBarRootIdRef.current = rootId
+            }
+
+            const created = await window.zap?.addFavorite({
+              title: 'New folder',
+              url: '',
+              favicon: null,
+              parent_id: rootId,
+              is_folder: 1,
+              sort_order: Date.now(),
+            })
+
+            console.log('[FavBar] created folder result', created)
+
+            const f = await window.zap?.getFavorites()
+            setFavBar(f || [])
+            window.dispatchEvent(new Event('favorites-updated'))
+
+            const createdFolder = created?.id
+              ? (f || []).find((item:any) => Number(item.id) === Number(created.id))
+              : null
+
+            if (createdFolder) {
+              setFavRename(createdFolder)
+              setFavRenameValue(createdFolder.title || 'New folder')
+            } else {
+              window.alert('Folder created, but could not open rename dialog.')
+            }
+          } catch (err:any) {
+            console.error('[FavBar] create folder failed', err)
+            window.alert('Create folder failed: ' + (err?.message || err))
           }
         }
 
@@ -1163,7 +1249,7 @@ export default function BrowserPage() {
                   setFavFolderOpen(null)
                   setFavDropOpen(false)
                 }}
-                onContextMenu={(e) => {
+                onContextMenu={async (e) => {
                   e.preventDefault()
                   e.stopPropagation()
                   setFavContext({
@@ -1212,18 +1298,32 @@ export default function BrowserPage() {
         return (
           <div
             data-zap-favbar="1"
-            onContextMenu={(e) => {
+            onContextMenu={async (e) => {
               const target = e.target as HTMLElement
               if (target.closest('[data-zap-favitem="1"]')) return
 
               e.preventDefault()
               e.stopPropagation()
-              setFavContext({
-                x: e.clientX,
-                y: e.clientY,
-                item: null,
-                type: 'bar'
-              })
+
+              const title = window.prompt('Folder name', 'New folder')
+
+              if (title?.trim()) {
+                const rootId = favBarRootIdRef.current ?? barRootId ?? null
+
+                await window.zap?.addFavorite({
+                  title: title.trim(),
+                  url: '',
+                  favicon: null,
+                  parent_id: rootId,
+                  is_folder: 1,
+                  sort_order: Date.now(),
+                })
+
+                const f = await window.zap?.getFavorites()
+                setFavBar(f || [])
+                window.dispatchEvent(new Event('favorites-updated'))
+              }
+
               setFavFolderOpen(null)
               setFavDropOpen(false)
             }}
@@ -1235,9 +1335,9 @@ export default function BrowserPage() {
             }}
           >
             <button
-              onClick={() => {
+              onClick={async () => {
                 console.log('[FavBar] plus clicked')
-                createFolderInBar()
+                await createFolderInBar()
               }}
               title="Nuova cartella preferiti"
               style={{
@@ -1266,7 +1366,7 @@ export default function BrowserPage() {
                       e.stopPropagation()
                       openFav(f, e)
                     }}
-                    onContextMenu={(e) => {
+                    onContextMenu={async (e) => {
                       e.preventDefault()
                       e.stopPropagation()
 

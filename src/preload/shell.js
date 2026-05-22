@@ -121,9 +121,17 @@ contextBridge.exposeInMainWorld('zap', {
       'bookmark-open-new-tab',
       'bookmark-rename',
       'bookmark-delete',
+      'bookmark-new-folder',
+      'bookmark-new-folder-request',
+      'bookmark-create-folder-request',
       'bookmark-folder-picked',
     ]
-    if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
+    if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => {
+      if (channel === 'bookmark-create-folder-request') {
+        console.log('[DEBUG][preload] event received:', channel, data)
+      }
+      cb(data)
+    })
   },
   off: (channel, cb) => ipcRenderer.removeListener(channel, cb),
 })

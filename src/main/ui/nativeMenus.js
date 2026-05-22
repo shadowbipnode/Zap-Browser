@@ -10,6 +10,18 @@ function setupWebViewContextMenu({ view, mainWindow, getActiveTabId }) {
 
     const template = []
 
+    if (params.selectionText && params.selectionText.trim()) {
+      template.push(
+        {
+          label: 'Copy',
+          click: () => {
+            require('electron').clipboard.writeText(params.selectionText)
+          },
+        },
+        { type: 'separator' }
+      )
+    }
+
     if (params.linkURL) {
       template.push(
         {

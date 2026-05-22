@@ -16,7 +16,7 @@ function showBookmarkFolderPopup({ mainWindow, items = [], x = 0, y = 0 }) {
 <html>
 <body style="margin:0;background:#151720;color:white;font-family:sans-serif;padding:6px;overflow:hidden;">
 ${items.length === 0 ? '<div style="padding:10px;color:#aaa;font-size:12px;">Empty folder</div>' : items.map(i => `
-<button data-url="${String(i.url || '')}" style="display:block;width:260px;text-align:left;background:transparent;color:white;border:0;padding:8px;border-radius:8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+<button data-id="${String(i.id || '')}" data-title="${String(i.title || '')}" data-folder="${Number(i.is_folder) === 1 ? 1 : 0}" data-url="${String(i.url || '')}" style="display:block;width:260px;text-align:left;background:transparent;color:white;border:0;padding:8px;border-radius:8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
 ${Number(i.is_folder) === 1 ? '📁' : '🌐'} ${String(i.title || i.url || '')}
 </button>`).join('')}
 <script>
@@ -24,6 +24,27 @@ const { ipcRenderer } = require('electron')
 document.querySelectorAll('button[data-url]').forEach(b => {
   b.addEventListener('click', () => {
     ipcRenderer.send('bookmark-folder-popup-picked', b.getAttribute('data-url'))
+  })
+
+  b.addEventListener('auxclick', (event) => {
+    if (event.button !== 1) return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    ipcRenderer.send('bookmark-folder-popup-open-new-tab', b.getAttribute('data-url'))
+  })
+
+  b.addEventListener('contextmenu', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    ipcRenderer.send('bookmark-folder-popup-context-menu', {
+      id: Number(b.getAttribute('data-id')),
+      title: b.getAttribute('data-title') || '',
+      url: b.getAttribute('data-url') || '',
+      is_folder: Number(b.getAttribute('data-folder')) === 1 ? 1 : 0,
+    })
   })
 })
 </script>
