@@ -94,6 +94,8 @@ contextBridge.exposeInMainWorld('zap', {
   cancelDownload: (a) => ipcRenderer.invoke('download-cancel', a),
   openDownload: (a) => ipcRenderer.invoke('download-open', a),
   showDownloadInFolder: (a) => ipcRenderer.invoke('download-show-folder', a),
+  showAddressSuggestions: (a) => ipcRenderer.invoke('address-suggestions-show', a),
+  hideAddressSuggestions: () => ipcRenderer.invoke('address-suggestions-hide'),
 
   // Data management
   resetBrowser: () => ipcRenderer.invoke('reset-browser'),
@@ -110,6 +112,7 @@ contextBridge.exposeInMainWorld('zap', {
       'tab-switched', 'page-features', 'v4v-detected', 'blocklist-ready',
       'open-new-tab', 'tab-ready', 'popup-blocked',
       'download-started', 'download-updated', 'download-done',
+      'address-suggestion-picked',
     ]
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
   },

@@ -1,5 +1,5 @@
 // src/renderer/pages/BrowserPage.tsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useBrowser } from '../store/browserStore'
 import WalletPanel    from '../components/wallet/WalletPanel'
 import NostrPanel     from '../components/nostr/NostrPanel'
@@ -45,6 +45,7 @@ export default function BrowserPage() {
   const [suggestions, setSuggestions] = useState<any[]>([])
   const [showSuggest, setShowSuggest] = useState(false)
   const [selectedSuggest, setSelectedSuggest] = useState(-1)
+  const selectedSuggestRef = useRef(-1)
   const [appVersion, setAppVersion] = useState('')
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [showUpdatePopup, setShowUpdatePopup] = useState(false)
@@ -167,6 +168,16 @@ export default function BrowserPage() {
     window.zap?.on('download-done', (data: any) => {
       setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
       setDownloadsOpen(true)
+    })
+
+    window.zap?.on('address-suggestion-picked', (data: any) => {
+      if (!data?.url) return
+      setAddrVal(data.url)
+      setSuggestions([])
+      setShowSuggest(false)
+      selectedSuggestRef.current = -1
+      setSelectedSuggest(-1)
+      handleNavigate(data.url)
     })
 
     const onPaymentSuccess = (e: any) => {
@@ -334,7 +345,7 @@ export default function BrowserPage() {
 
   const handleAddrInput = async (val: string) => {
     setAddrVal(val)
-    if (val.length < 2) { setSuggestions([]); setShowSuggest(false); return }
+    if (val.length < 2) { setSuggestions([]); setShowSuggest(false); window.zap?.hideAddressSuggestions?.(); return }
     try {
       const hist = await (window as any).zap?.getHistory({ limit: 500 }) || []
       const q = val.toLowerCase()
@@ -358,38 +369,83 @@ export default function BrowserPage() {
         if (found.length >= 7) break
       }
       setSuggestions(found)
-      setShowSuggest(found.length > 0)
-      setSelectedSuggest(found.length > 0 ? 0 : -1)
+      setShowSuggest(false)
+      selectedSuggestRef.current = found.length > 0 ? 0 : -1
+      setSelectedSuggest(selectedSuggestRef.current)
+
+      if (found.length > 0) {
+        const el = document.activeElement as HTMLElement | null
+        const rect = el?.getBoundingClientRect?.()
+
+        if (rect) {
+          await window.zap?.showAddressSuggestions?.({
+            items: found,
+            selectedIndex: selectedSuggestRef.current,
+            x: window.screenX + rect.left,
+            y: window.screenY + rect.bottom + 8,
+            width: rect.width,
+          })
+        }
+      } else {
+        await window.zap?.hideAddressSuggestions?.()
+      }
     } catch(e) { console.error('[history] errore:', e) }
+  }
+
+  const refreshNativeSuggestions = async (items:any[], selectedIndex:number) => {
+    const el = document.activeElement as HTMLElement | null
+    const rect = el?.getBoundingClientRect?.()
+
+    if (!rect || !items.length) return
+
+    await window.zap?.showAddressSuggestions?.({
+      items,
+      selectedIndex,
+      x: window.screenX + rect.left,
+      y: window.screenY + rect.bottom + 8,
+      width: rect.width,
+    })
   }
 
   const handleAddrKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
       setShowSuggest(false)
+      selectedSuggestRef.current = -1
       setSelectedSuggest(-1)
+      setSuggestions([])
+      window.zap?.hideAddressSuggestions?.()
       return
     }
 
-    if (showSuggest && suggestions.length > 0) {
+    if (suggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSelectedSuggest(v => v < suggestions.length - 1 ? v + 1 : 0)
+        const next = selectedSuggestRef.current < suggestions.length - 1 ? selectedSuggestRef.current + 1 : 0
+        selectedSuggestRef.current = next
+        setSelectedSuggest(next)
+        refreshNativeSuggestions(suggestions, next)
         return
       }
 
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSelectedSuggest(v => v > 0 ? v - 1 : suggestions.length - 1)
+        const next = selectedSuggestRef.current > 0 ? selectedSuggestRef.current - 1 : suggestions.length - 1
+        selectedSuggestRef.current = next
+        setSelectedSuggest(next)
+        refreshNativeSuggestions(suggestions, next)
         return
       }
 
       if (e.key === 'Enter' && selectedSuggest >= 0) {
         e.preventDefault()
-        const item = suggestions[selectedSuggest]
+        const item = suggestions[selectedSuggestRef.current]
         if (item?.url) {
           setAddrVal(item.url)
           setShowSuggest(false)
+          selectedSuggestRef.current = -1
           setSelectedSuggest(-1)
+          setSuggestions([])
+          window.zap?.hideAddressSuggestions?.()
           handleNavigate(item.url)
           return
         }
@@ -400,6 +456,7 @@ export default function BrowserPage() {
 
     setShowSuggest(false)
     setSelectedSuggest(-1)
+    window.zap?.hideAddressSuggestions?.()
 
     const v = addrVal.trim()
 

@@ -20,6 +20,10 @@ const {
   resizeView,
 } = require('./browser/viewManager')
 
+const {
+  setupWebViewContextMenu,
+} = require('./ui/nativeMenus')
+
 const isDev = !app.isPackaged
 const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
@@ -29,6 +33,7 @@ const tabUrls   = new Map()
 let activeTabId = null
 let isSwitching = false
 const activeDownloads = new Map()
+let addressSuggestWindow = null
 
 
 const UA_POOL = [
@@ -39,6 +44,197 @@ const UA_POOL = [
 ]
 let currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
 const nostrSessionPermissions = new Map()
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function hideAddressSuggestions() {
+  if (addressSuggestWindow && !addressSuggestWindow.isDestroyed()) {
+    addressSuggestWindow.hide()
+  }
+}
+
+function showAddressSuggestions({ items = [], x = 0, y = 0, width = 720, selectedIndex = 0 }) {
+  if (!mainWindow || !Array.isArray(items) || items.length === 0) {
+    hideAddressSuggestions()
+    return { ok: true }
+  }
+
+  const safeItems = items
+    .filter(item => item && item.url)
+    .slice(0, 8)
+    .map(item => ({
+      title: String(item.title || item.url || ''),
+      url: String(item.url || ''),
+      favicon: String(item.favicon || ''),
+    }))
+
+  if (safeItems.length === 0) {
+    hideAddressSuggestions()
+    return { ok: true }
+  }
+
+  const rowHeight = 54
+  const popupHeight = Math.min(430, safeItems.length * rowHeight + 14)
+  const popupWidth = Math.max(360, Math.min(Number(width) || 720, 900))
+
+  if (!addressSuggestWindow || addressSuggestWindow.isDestroyed()) {
+    addressSuggestWindow = new BrowserWindow({
+      width: popupWidth,
+      height: popupHeight,
+      x: Math.round(Number(x) || 0),
+      y: Math.round(Number(y) || 0),
+      parent: mainWindow,
+      frame: false,
+      show: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      focusable: false,
+      backgroundColor: '#111217',
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        sandbox: false,
+      },
+    })
+
+    addressSuggestWindow.on('closed', () => {
+      addressSuggestWindow = null
+    })
+  }
+
+  addressSuggestWindow.setBounds({
+    x: Math.round(Number(x) || 0),
+    y: Math.round(Number(y) || 0),
+    width: popupWidth,
+    height: popupHeight,
+  })
+
+  const rows = safeItems.map((item, idx) => `
+    <button class="row ${idx === Number(selectedIndex) ? 'selected' : ''}" data-url="${escapeHtml(item.url)}">
+      <div class="ico">${item.favicon ? `<img src="${escapeHtml(item.favicon)}" />` : '🌐'}</div>
+      <div class="meta">
+        <div class="title">${escapeHtml(item.title)}</div>
+        <div class="url">${escapeHtml(item.url)}</div>
+      </div>
+    </button>
+  `).join('')
+
+  const html = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  .wrap {
+    margin: 0;
+    padding: 7px;
+    width: 100vw;
+    height: 100vh;
+    background: #151720;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    box-shadow: 0 20px 70px rgba(0,0,0,.65);
+  }
+  .row {
+    width: 100%;
+    height: 54px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #f4f4f5;
+    text-align: left;
+    cursor: pointer;
+    padding: 7px 10px;
+  }
+  .row:hover,
+  .row.selected {
+    background: rgba(255,255,255,.10);
+  }
+
+  .row.selected {
+    outline: 1px solid rgba(245,166,35,.35);
+  }
+  .ico {
+    width: 24px;
+    height: 24px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex: 0 0 auto;
+    font-size: 15px;
+  }
+  .ico img {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+  }
+  .meta {
+    min-width: 0;
+  }
+  .title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f4f4f5;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+  .url {
+    margin-top: 2px;
+    font-size: 11px;
+    color: #8b949e;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    ${rows}
+  </div>
+<script>
+  const { ipcRenderer } = require('electron')
+  document.querySelectorAll('.row').forEach(row => {
+    row.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const url = row.getAttribute('data-url')
+      if (url) ipcRenderer.send('address-suggestion-selected', url)
+    })
+  })
+</script>
+</body>
+</html>`
+
+  addressSuggestWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+  addressSuggestWindow.showInactive()
+
+  return { ok: true }
+}
 
 function getIpcOrigin(ipcEvent) {
   const url =
@@ -324,6 +520,15 @@ function createMainView() {
       mainWindow?.webContents.send('popup-blocked', { url })
       return { action: 'deny' }
     }
+  })
+
+  // Native browser context menu.
+  // This avoids React overlays above BrowserView and gives Zap Browser
+  // desktop-grade right-click behavior.
+  setupWebViewContextMenu({
+    view,
+    mainWindow,
+    getActiveTabId: () => activeTabId,
   })
 
   // Suppress the browser's unload dialog so closing a tab is never blocked
@@ -997,6 +1202,20 @@ ipcMain.handle('download-show-folder', (_, { path: filePath }) => {
   V.assert(typeof filePath === 'string' && filePath.length > 0 && filePath.length <= 5000, 'Invalid download path')
   shell.showItemInFolder(filePath)
   return { ok: true }
+})
+
+ipcMain.handle('address-suggestions-show', (_, args) => showAddressSuggestions(args || {}))
+ipcMain.handle('address-suggestions-hide', () => {
+  hideAddressSuggestions()
+  return { ok: true }
+})
+
+ipcMain.on('address-suggestion-selected', (_event, url) => {
+  hideAddressSuggestions()
+
+  if (!url || typeof url !== 'string') return
+
+  mainWindow?.webContents.send('address-suggestion-picked', { url })
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────
