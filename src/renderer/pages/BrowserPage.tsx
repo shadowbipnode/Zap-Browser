@@ -363,7 +363,12 @@ export default function BrowserPage() {
             seen.add(domain)
             // Mostra homepage del dominio, non la pagina specifica
             const homeUrl = new URL(h.url).origin
-            found.push({ ...h, url: homeUrl, title: domain })
+            found.push({
+              ...h,
+              url: homeUrl,
+              title: domain,
+              favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`
+            })
           }
         } catch(_) {}
         if (found.length >= 7) break

@@ -33,6 +33,7 @@ const tabUrls   = new Map()
 let activeTabId = null
 let isSwitching = false
 const activeDownloads = new Map()
+const lastTabUpdates = new Map()
 let addressSuggestWindow = null
 
 
@@ -407,6 +408,19 @@ function parseNativePaymentUrl(rawUrl) {
   return null
 }
 
+function sendTabUpdated(tabId, patch = {}) {
+  if (!mainWindow || !tabId) return
+
+  const previous = lastTabUpdates.get(tabId) || {}
+  const next = { ...previous, ...patch }
+
+  const changed = Object.keys(patch).some((key) => previous[key] !== patch[key])
+  if (!changed) return
+
+  lastTabUpdates.set(tabId, next)
+  mainWindow.webContents.send('tab-updated', { tabId, ...patch })
+}
+
 function createMainView() {
   const view = new BrowserView({
     webPreferences: {
@@ -426,8 +440,7 @@ function createMainView() {
 
   view.webContents.on('page-title-updated', (_, title) => {
     if (!activeTabId) return
-    mainWindow?.webContents.send('tab-updated', {
-      tabId: activeTabId,
+    sendTabUpdated(activeTabId, {
       title,
       url: view.webContents.getURL(),
     })
@@ -436,8 +449,7 @@ function createMainView() {
   view.webContents.on('did-navigate', async (_, url) => {
     if (!activeTabId) return
     tabUrls.set(activeTabId, url)
-    mainWindow?.webContents.send('tab-updated', {
-      tabId: activeTabId,
+    sendTabUpdated(activeTabId, {
       url,
       canGoBack: view.webContents.canGoBack(),
       canGoForward: view.webContents.canGoForward(),
@@ -454,7 +466,7 @@ function createMainView() {
 
   view.webContents.on('did-start-loading', () => {
     if (activeTabId && !isSwitching) {
-      mainWindow?.webContents.send('tab-updated', { tabId: activeTabId, loading: true })
+      sendTabUpdated(activeTabId, { loading: true })
     }
   })
 
@@ -462,7 +474,7 @@ function createMainView() {
     if (!activeTabId) return
     const url   = view.webContents.getURL()
     const title = view.webContents.getTitle()
-    mainWindow?.webContents.send('tab-updated', { tabId: activeTabId, loading: false, url, title })
+    sendTabUpdated(activeTabId, { loading: false, url, title })
     if (url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
       DB.addHistory(url, title)
     }
