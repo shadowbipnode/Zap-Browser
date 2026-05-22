@@ -102,6 +102,9 @@ function init() {
       custom_ua      TEXT,
       doh_enabled    INTEGER NOT NULL DEFAULT 1,
       doh_provider   TEXT    NOT NULL DEFAULT 'https://cloudflare-dns.com/dns-query',
+      tor_enabled    INTEGER NOT NULL DEFAULT 0,
+      tor_host       TEXT    NOT NULL DEFAULT '127.0.0.1',
+      tor_port       INTEGER NOT NULL DEFAULT 9050,
       popup_block    INTEGER NOT NULL DEFAULT 1,
       overlay_block  INTEGER NOT NULL DEFAULT 1
     );
@@ -155,10 +158,35 @@ function setSetting(key, value) {
 }
 
 // ── Privacy ───────────────────────────────────────────────────────────────────
+
+try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_enabled INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+try { db.prepare("ALTER TABLE privacy_settings ADD COLUMN tor_host TEXT NOT NULL DEFAULT '127.0.0.1'").run() } catch (_) {}
+try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_port INTEGER NOT NULL DEFAULT 9050').run() } catch (_) {}
+
+
+function ensurePrivacyMigrations() {
+  const cols = db.prepare("PRAGMA table_info(privacy_settings)").all().map(c => c.name)
+
+  if (!cols.includes('tor_enabled')) {
+    db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_enabled INTEGER NOT NULL DEFAULT 0').run()
+  }
+
+  if (!cols.includes('tor_host')) {
+    db.prepare("ALTER TABLE privacy_settings ADD COLUMN tor_host TEXT NOT NULL DEFAULT '127.0.0.1'").run()
+  }
+
+  if (!cols.includes('tor_port')) {
+    db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_port INTEGER NOT NULL DEFAULT 9050').run()
+  }
+}
+
+
 function getPrivacy() {
+  ensurePrivacyMigrations()
   return db.prepare('SELECT * FROM privacy_settings WHERE id=1').get()
 }
 function setPrivacy(key, value) {
+  ensurePrivacyMigrations()
   db.prepare(`UPDATE privacy_settings SET ${key}=? WHERE id=1`).run(value)
   return getPrivacy()
 }

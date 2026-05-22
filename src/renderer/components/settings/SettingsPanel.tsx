@@ -132,6 +132,24 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
                 on={!!priv.adblock} onToggle={()=>togglePriv('adblock')} />
             <TR label={`🔌 ${t('webrtc')}`} desc={t('webrtcDesc')} on={!!priv.webrtc_protect} onToggle={()=>togglePriv('webrtc')} />
             <TR label={`🔐 ${t('doh')}`} desc={t('dohDesc')} on={!!priv.dohEnabled} onToggle={()=>togglePriv('doh')} />
+            <TR
+              label={`🧅 ${lang==='it' ? 'Tor / SOCKS5 Proxy' : 'Tor / SOCKS5 Proxy'}`}
+              desc={priv.tor_enabled
+                ? `${lang==='it' ? 'Instradamento via' : 'Routing via'} ${priv.tor_host || '127.0.0.1'}:${priv.tor_port || 9050}`
+                : (lang==='it'
+                  ? 'Disattivato. Usa un proxy SOCKS5 locale, es. Tor su 127.0.0.1:9050.'
+                  : 'Disabled. Use a local SOCKS5 proxy, e.g. Tor on 127.0.0.1:9050.')
+              }
+              on={!!priv.tor_enabled}
+              onToggle={async () => {
+                await z()?.setTorProxy({
+                  enabled: !priv.tor_enabled,
+                  host: priv.tor_host || '127.0.0.1',
+                  port: priv.tor_port || 9050,
+                })
+                z()?.getPrivacy().then(setPriv)
+              }}
+            />
             <div className="sec-title" style={{marginTop:18}}>User-Agent</div>
             <TR label={`🔄 ${t('uaRotate')}`} desc={t('uaRotateDesc')} on={priv.ua_mode==='rotate'}
               onToggle={async()=>{ await z()?.setUAMode({mode:'rotate'}); z()?.getPrivacy().then(setPriv) }} />

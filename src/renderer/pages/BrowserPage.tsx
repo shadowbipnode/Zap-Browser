@@ -816,12 +816,39 @@ export default function BrowserPage() {
             value={addrVal}
             onChange={e => handleAddrInput(e.target.value)}
             onKeyDown={handleAddrKey}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              window.zap?.showEditContextMenu?.()
+            }}
             onFocus={e => e.target.select()}
             placeholder={L('Cerca o inserisci URL, invoice Lightning, token Cashu...','Search or enter URL, Lightning invoice, Cashu token...')}
             spellCheck={false}
             autoFocus
           />
         </div>
+
+        <button
+          title="Save bookmark"
+          onClick={() => {
+            if (!activeTab?.url || activeTab.url === 'zap://newtab') return
+            setBookmarkTitle(activeTab?.title || activeTab?.url || '')
+            setBookmarkFolder('root')
+            setBookmarkNewFolderName('')
+            setShowBookmarkSave(true)
+          }}
+          style={{
+            background:'none',
+            border:'none',
+            color:'var(--t2)',
+            cursor:'pointer',
+            fontSize:15,
+            padding:'0 8px',
+            flexShrink:0,
+          }}
+        >
+          🔖
+        </button>
 
         {/* Site permissions are shown inside the Nostr side panel */}
 
@@ -883,25 +910,35 @@ export default function BrowserPage() {
         )}
 
         <button
-          title="Save bookmark"
-          onClick={() => {
-            if (!activeTab?.url || activeTab.url === 'zap://newtab') return
-            setBookmarkTitle(activeTab?.title || activeTab?.url || '')
-            setBookmarkFolder('root')
-            setBookmarkNewFolderName('')
-            setShowBookmarkSave(true)
+          title={privacy?.tor_enabled ? 'Tor enabled' : 'Tor disabled'}
+          onClick={async () => {
+            try {
+              await window.zap?.setTorProxy({
+                enabled: !privacy?.tor_enabled,
+                host: privacy?.tor_host || '127.0.0.1',
+                port: privacy?.tor_port || 9050,
+              })
+
+              const p = await window.zap?.getPrivacy()
+              setPrivacy(p)
+            } catch (err) {
+              console.error('[Tor] toggle failed', err)
+              window.alert('Tor toggle failed')
+            }
           }}
           style={{
-            background:'none',
-            border:'none',
-            color:'var(--t2)',
+            background: privacy?.tor_enabled ? 'rgba(168,85,247,.16)' : 'none',
+            border: privacy?.tor_enabled ? '1px solid rgba(168,85,247,.45)' : 'none',
+            color: privacy?.tor_enabled ? '#c084fc' : 'var(--t2)',
             cursor:'pointer',
-            fontSize:15,
-            padding:'0 8px',
+            fontSize:16,
+            padding:'4px 10px',
+            borderRadius:999,
             flexShrink:0,
+            transition:'all .18s ease',
           }}
         >
-          ⭐
+          🧅
         </button>
 
         <button

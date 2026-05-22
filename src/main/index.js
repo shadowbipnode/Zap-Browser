@@ -419,6 +419,29 @@ function parseNativePaymentUrl(rawUrl) {
   return null
 }
 
+async function applyNetworkProxy() {
+  const priv = DB.getPrivacy()
+  const enabled = Number(priv?.tor_enabled) === 1
+  const host = String(priv?.tor_host || '127.0.0.1').trim()
+  const port = Number(priv?.tor_port || 9050)
+
+  if (!enabled) {
+    await session.defaultSession.setProxy({ proxyRules: '' })
+    return { ok: true, enabled: false }
+  }
+
+  if (!host || !Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    return { ok: false, error: 'Invalid Tor/SOCKS proxy settings' }
+  }
+
+  await session.defaultSession.setProxy({
+    proxyRules: `socks5://${host}:${port}`,
+    proxyBypassRules: '<-loopback>',
+  })
+
+  return { ok: true, enabled: true, host, port }
+}
+
 function sendTabUpdated(tabId, patch = {}) {
   if (!mainWindow || !tabId) return
 
@@ -1087,6 +1110,7 @@ function createWindow() {
 
   setupPrivacy(session.defaultSession)
   setupDownloads(session.defaultSession)
+  applyNetworkProxy().catch(err => console.error('[Proxy] apply failed', err))
 
   bl.init((size) => {
     mainWindow?.webContents.send('blocklist-ready', { size })
@@ -1285,6 +1309,21 @@ ipcMain.on('bookmark-folder-popup-context-menu', (_event, bookmark) => {
   })
 })
 
+ipcMain.handle('show-edit-context-menu', () => {
+  const { Menu } = require('electron')
+
+  const menu = Menu.buildFromTemplate([
+    { role: 'cut', label: 'Cut' },
+    { role: 'copy', label: 'Copy' },
+    { role: 'paste', label: 'Paste' },
+    { type: 'separator' },
+    { role: 'selectAll', label: 'Select All' },
+  ])
+
+  menu.popup({ window: mainWindow })
+  return { ok: true }
+})
+
 // ── IPC: privacy ──────────────────────────────────────────────────────────────
 ipcMain.handle('get-privacy', () => ({
   ...DB.getPrivacy(),
@@ -1315,6 +1354,22 @@ ipcMain.handle('set-doh', (_, { enabled, provider }) => {
   if (provider) doh.setProvider(provider)
   DB.setPrivacy('doh_enabled', enabled ? 1 : 0)
   return { ok: true }
+})
+ipcMain.handle('set-tor-proxy', async (_, { enabled, host, port } = {}) => {
+  DB.setPrivacy('tor_enabled', enabled ? 1 : 0)
+
+  if (host != null) {
+    V.assert(typeof host === 'string' && host.length > 0 && host.length <= 255, 'Invalid proxy host')
+    DB.setPrivacy('tor_host', host.trim())
+  }
+
+  if (port != null) {
+    const safePort = Number(port)
+    V.assert(Number.isSafeInteger(safePort) && safePort > 0 && safePort <= 65535, 'Invalid proxy port')
+    DB.setPrivacy('tor_port', safePort)
+  }
+
+  return applyNetworkProxy()
 })
 ipcMain.handle('get-blocklist-info', () => ({
   size:  bl.getListSize(),

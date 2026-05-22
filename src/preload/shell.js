@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('zap', {
   getBlockedCount:  () => ipcRenderer.invoke('get-blocked-count'),
   getUAPool:        () => ipcRenderer.invoke('get-ua-pool'),
   setDoh:           (a) => ipcRenderer.invoke('set-doh', a),
+  setTorProxy:      (a) => ipcRenderer.invoke('set-tor-proxy', a),
+  showEditContextMenu: () => ipcRenderer.invoke('show-edit-context-menu'),
   getBlocklistInfo: () => ipcRenderer.invoke('get-blocklist-info'),
 
   // Value4Value
