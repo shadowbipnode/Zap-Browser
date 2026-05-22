@@ -28,6 +28,13 @@ const {
   showBookmarkContextMenu,
 } = require('./ui/bookmarkMenus')
 
+const {
+  showBookmarkFolderPopup,
+  hideBookmarkFolderPopup,
+} = require('./ui/bookmarkFolderPopup')
+
+
+
 const isDev = !app.isPackaged
 const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
@@ -1241,6 +1248,26 @@ ipcMain.handle('show-bookmark-context-menu', (_, bookmark) => {
   })
 
   return { ok: true }
+})
+
+ipcMain.handle('show-bookmark-folder-popup', (_, args) => {
+  return showBookmarkFolderPopup({
+    mainWindow,
+    folder: args?.folder,
+    items: args?.items || [],
+    x: args?.x || 0,
+    y: args?.y || 0,
+  })
+})
+
+ipcMain.handle('hide-bookmark-folder-popup', () => {
+  hideBookmarkFolderPopup()
+  return { ok: true }
+})
+
+ipcMain.on('bookmark-folder-popup-picked', (_event, item) => {
+  hideBookmarkFolderPopup()
+  mainWindow?.webContents.send('bookmark-folder-picked', item)
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────

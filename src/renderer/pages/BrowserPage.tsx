@@ -211,6 +211,15 @@ export default function BrowserPage() {
       window.dispatchEvent(new Event('favorites-updated'))
     })
 
+    window.zap?.on('bookmark-folder-picked', (item: any) => {
+      const url = typeof item === 'string' ? item : item?.url
+
+      if (!url) return
+
+      window.zap?.hideBookmarkFolderPopup?.()
+      handleNavigate(url)
+    })
+
     const onPaymentSuccess = (e: any) => {
       setPaymentSuccess((e as CustomEvent).detail || {})
       setTimeout(() => setPaymentSuccess(null), 7000)
@@ -1115,9 +1124,21 @@ export default function BrowserPage() {
 
         const getChildren = (id:any) => byParent[String(id)] || []
 
-        const openFav = (f:any) => {
+        const openFav = async (f:any, e?:any) => {
           if (Number(f.is_folder) === 1) {
-            setFavFolderOpen(favFolderOpen === f.id ? null : f.id)
+            const children = getChildren(f.id)
+            const rect = e?.currentTarget?.getBoundingClientRect?.()
+
+            if (rect) {
+              await window.zap?.showBookmarkFolderPopup?.({
+                folder: f,
+                items: children,
+                x: window.screenX + rect.left,
+                y: window.screenY + rect.bottom + 6,
+              })
+            }
+
+            setFavFolderOpen(null)
             setFavDropOpen(false)
             return
           }
@@ -1125,6 +1146,7 @@ export default function BrowserPage() {
           handleNavigate(f.url)
           setFavFolderOpen(null)
           setFavDropOpen(false)
+          window.zap?.hideBookmarkFolderPopup?.()
         }
 
         const renderMenuItems = (items:any[], depth = 0): any[] => {
@@ -1242,7 +1264,7 @@ export default function BrowserPage() {
                     data-zap-favitem="1"
                     onClick={(e) => {
                       e.stopPropagation()
-                      openFav(f)
+                      openFav(f, e)
                     }}
                     onContextMenu={(e) => {
                       e.preventDefault()
@@ -1272,27 +1294,7 @@ export default function BrowserPage() {
                     {isFolder ? '📁' : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
                   </button>
 
-                  {isFolder && favFolderOpen === f.id && (
-                    <div style={{
-                      position:'absolute',
-                      top:24,
-                      left:0,
-                      zIndex:9999,
-                      background:'var(--bg-1)',
-                      border:'1px solid var(--b1)',
-                      borderRadius:'var(--r-md)',
-                      boxShadow:'0 8px 32px rgba(0,0,0,.45)',
-                      minWidth:240,
-                      maxWidth:360,
-                      maxHeight:360,
-                      overflowY:'auto',
-                      padding:'4px 0',
-                    }}>
-                      {children.length === 0
-                        ? <div style={{fontSize:12,color:'var(--t2)',padding:'8px 12px'}}>Cartella vuota</div>
-                        : renderMenuItems(children)}
-                    </div>
-                  )}
+
                 </div>
               )
             })}

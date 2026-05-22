@@ -97,6 +97,10 @@ contextBridge.exposeInMainWorld('zap', {
   showAddressSuggestions: (a) => ipcRenderer.invoke('address-suggestions-show', a),
   hideAddressSuggestions: () => ipcRenderer.invoke('address-suggestions-hide'),
   showBookmarkContextMenu: (a) => ipcRenderer.invoke('show-bookmark-context-menu', a),
+  showBookmarkFolderPopup: (a) => ipcRenderer.invoke('show-bookmark-folder-popup', a),
+  hideBookmarkFolderPopup: () => ipcRenderer.invoke('hide-bookmark-folder-popup'),
+  showBookmarkFolderPopup: (a) => ipcRenderer.invoke('show-bookmark-folder-popup', a),
+  hideBookmarkFolderPopup: () => ipcRenderer.invoke('hide-bookmark-folder-popup'),
 
   // Data management
   resetBrowser: () => ipcRenderer.invoke('reset-browser'),
@@ -117,6 +121,7 @@ contextBridge.exposeInMainWorld('zap', {
       'bookmark-open-new-tab',
       'bookmark-rename',
       'bookmark-delete',
+      'bookmark-folder-picked',
     ]
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
   },
