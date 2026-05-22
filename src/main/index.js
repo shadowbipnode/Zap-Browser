@@ -24,6 +24,10 @@ const {
   setupWebViewContextMenu,
 } = require('./ui/nativeMenus')
 
+const {
+  showBookmarkContextMenu,
+} = require('./ui/bookmarkMenus')
+
 const isDev = !app.isPackaged
 const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
@@ -1228,6 +1232,15 @@ ipcMain.on('address-suggestion-selected', (_event, url) => {
   if (!url || typeof url !== 'string') return
 
   mainWindow?.webContents.send('address-suggestion-picked', { url })
+})
+
+ipcMain.handle('show-bookmark-context-menu', (_, bookmark) => {
+  showBookmarkContextMenu({
+    mainWindow,
+    bookmark,
+  })
+
+  return { ok: true }
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────

@@ -180,6 +180,37 @@ export default function BrowserPage() {
       handleNavigate(data.url)
     })
 
+    window.zap?.on('bookmark-open-new-tab', (bookmark: any) => {
+      if (bookmark?.url) handleNewTab(bookmark.url)
+    })
+
+    window.zap?.on('bookmark-rename', (bookmark: any) => {
+      setFavRename(bookmark)
+      setFavRenameValue(bookmark?.title || '')
+    })
+
+    window.zap?.on('bookmark-delete', async (bookmark: any) => {
+      if (!bookmark?.id) return
+
+      const isFolder = Number(bookmark.is_folder) === 1
+      const name = bookmark.title || (isFolder ? 'this folder' : 'this bookmark')
+
+      const ok = window.confirm(
+        isFolder
+          ? `Delete folder "${name}" and all its contents?`
+          : `Delete bookmark "${name}"?`
+      )
+
+      if (!ok) return
+
+      await window.zap?.removeFavorite({ id: bookmark.id })
+
+      const f = await window.zap?.getFavorites()
+      setFavBar(f || [])
+
+      window.dispatchEvent(new Event('favorites-updated'))
+    })
+
     const onPaymentSuccess = (e: any) => {
       setPaymentSuccess((e as CustomEvent).detail || {})
       setTimeout(() => setPaymentSuccess(null), 7000)
@@ -1216,12 +1247,9 @@ export default function BrowserPage() {
                     onContextMenu={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      setFavContext({
-                        x: e.clientX,
-                        y: e.clientY,
-                        item: f,
-                        type: isFolder ? 'folder' : 'bookmark'
-                      })
+
+                      window.zap?.showBookmarkContextMenu?.(f)
+
                       setFavFolderOpen(null)
                       setFavDropOpen(false)
                     }}
