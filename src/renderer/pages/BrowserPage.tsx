@@ -18,7 +18,7 @@ interface TabState {
 
 export default function BrowserPage() {
   const { L } = useLang()
-  const { tabs, activeId, addTab, closeTab, setActive, updateTab, navigate } = useBrowser()
+  const { tabs, activeId, addTab, closeTab, setActive, reorderTabs, updateTab, navigate } = useBrowser()
   const [panel, setPanel]       = useState<Panel>(null)
   const [addrVal, setAddrVal]   = useState('')
   const [privacy, setPrivacy]   = useState<any>(null)
@@ -57,6 +57,8 @@ export default function BrowserPage() {
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
+  const [dragTabId, setDragTabId] = useState<string | null>(null)
+
 
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
   const isNew = !activeTab?.url || activeTab.url === 'zap://newtab' || activeTab.url === '' || activeTab.url === ''
@@ -741,8 +743,30 @@ export default function BrowserPage() {
       {/* ── Tab bar ──────────────────────────────────────────────────── */}
       <div className="tabbar">
         {tabs.map(t => (
-          <div key={t.id} className={`tab ${t.id === activeId ? 'active' : ''}`}
-            onClick={() => handleSwitchTab(t.id)}>
+          <div
+            key={t.id}
+            draggable
+            className={`tab ${t.id === activeId ? 'active' : ''} ${dragTabId === t.id ? 'dragging' : ''}`}
+            onDragStart={(e) => {
+              setDragTabId(t.id)
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', t.id)
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              const fromId = e.dataTransfer.getData('text/plain') || dragTabId
+              if (fromId && fromId !== t.id) {
+                reorderTabs(fromId, t.id)
+              }
+              setDragTabId(null)
+            }}
+            onDragEnd={() => setDragTabId(null)}
+            onClick={() => handleSwitchTab(t.id)}
+          >
             <span className="tab-icon">
               {t.favicon ? (
                 <img src={t.favicon} alt="" style={{width:14,height:14,borderRadius:3}} />

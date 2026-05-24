@@ -25,6 +25,7 @@ interface Store {
   addTab: (url?: string, id?: string) => void
   closeTab: (id: string) => void
   setActive: (id: string) => void
+  reorderTabs: (fromId: string, toId: string) => void
   updateTab: (id: string, p: Partial<Tab>) => void
   navigate: (url: string) => void
 }
@@ -51,6 +52,19 @@ export const useBrowser = create<Store>((set, get) => ({
   }),
 
   setActive: (id) => set({ activeId: id }),
+
+  reorderTabs: (fromId, toId) => set(s => {
+    const fromIndex = s.tabs.findIndex(t => t.id === fromId)
+    const toIndex = s.tabs.findIndex(t => t.id === toId)
+
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return s
+
+    const tabs = [...s.tabs]
+    const [moved] = tabs.splice(fromIndex, 1)
+    tabs.splice(toIndex, 0, moved)
+
+    return { tabs }
+  }),
 
   updateTab: (id, p) => set(s => ({
     tabs: s.tabs.map(t => t.id === id ? { ...t, ...p } : t),

@@ -768,3 +768,12 @@ html[data-theme="minimal"] .toolbar,
 html[data-theme="minimal"] .tabbar {
   box-shadow: none;
 }
+
+.tab.dragging {
+  opacity: .45;
+  transform: scale(.96);
+}
+
+.tab[draggable="true"] {
+  user-select: none;
+}
