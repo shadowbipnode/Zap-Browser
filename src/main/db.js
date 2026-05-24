@@ -134,6 +134,17 @@ function init() {
   try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN last_used_at INTEGER').run() } catch (_) {}
   try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_pubkey ON nostr_profile(pubkey)').run() } catch (_) {}
 
+  // NIP-07 permissions per active Nostr profile
+  try { db.prepare('ALTER TABLE nostr_permissions ADD COLUMN profile_id INTEGER').run() } catch (_) {}
+  try {
+    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
+    if (active) {
+      db.prepare('UPDATE nostr_permissions SET profile_id=? WHERE profile_id IS NULL').run(active.id)
+    }
+  } catch (_) {}
+  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_permissions_profile_origin_action ON nostr_permissions(profile_id, origin, action)').run() } catch (_) {}
+
+
   try {
     const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
     const first = db.prepare('SELECT id FROM nostr_profile ORDER BY id ASC LIMIT 1').get()
@@ -386,6 +397,11 @@ function clearHistory() {
 }
 
 // ── Nostr permissions ─────────────────────────────────────────────────────────
+function getActiveNostrProfileId() {
+  const row = db.prepare('SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1').get()
+  return row?.id || null
+}
+
 function getNostrPermission(origin, action) {
   return db
     .prepare('SELECT decision FROM nostr_permissions WHERE origin=? AND action=?')
@@ -407,20 +423,20 @@ function setNostrPermission(origin, action, decision) {
 
 function listNostrPermissions() {
   return db
-    .prepare('SELECT origin, action, decision, updated_at FROM nostr_permissions ORDER BY updated_at DESC')
+    .prepare('SELECT profile_id, origin, action, decision, updated_at FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) ORDER BY updated_at DESC')
     .all()
 }
 
 function removeNostrPermission(origin, action) {
   db
-    .prepare('DELETE FROM nostr_permissions WHERE origin=? AND action=?')
+    .prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) AND origin=? AND action=?')
     .run(origin, action)
 
   return { ok: true }
 }
 
 function clearNostrPermissions() {
-  db.prepare('DELETE FROM nostr_permissions').run()
+  db.prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1)').run()
   return { ok: true }
 }
 
