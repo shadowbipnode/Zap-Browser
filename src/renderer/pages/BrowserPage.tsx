@@ -63,6 +63,12 @@ export default function BrowserPage() {
 
   // Load privacy settings
   useEffect(() => {
+    window.zap?.getDownloadHistory?.().then((items:any[]) => {
+      if (Array.isArray(items)) setDownloads(items)
+    })
+  }, [])
+
+  useEffect(() => {
     window.zap?.getPrivacy().then(setPrivacy)
     const loadFavBar = () => window.zap?.getFavorites().then((f: any[]) => setFavBar(f || []))
     loadFavBar()
@@ -163,6 +169,13 @@ export default function BrowserPage() {
       setTimeout(() => setPopupBlocked(null), 4500)
     })
 
+    window.zap?.getDownloadHistory?.().then((items:any[]) => {
+      console.log('[Renderer] restored downloads', items)
+      if (Array.isArray(items)) {
+        setDownloads(items)
+      }
+    })
+
     window.zap?.on('download-started', (data: any) => {
       setDownloads(prev => [data, ...prev.filter(d => d.id !== data.id)])
       setDownloadsOpen(true)
@@ -175,6 +188,12 @@ export default function BrowserPage() {
     window.zap?.on('download-done', (data: any) => {
       setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
       setDownloadsOpen(true)
+
+      try {
+        new Notification('Download completed', {
+          body: data?.path || 'File downloaded successfully',
+        })
+      } catch (_) {}
     })
 
     window.zap?.on('address-suggestion-picked', (data: any) => {

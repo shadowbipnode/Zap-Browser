@@ -1,5 +1,5 @@
 'use strict'
-const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell } = require('electron')
+const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell, Notification } = require('electron')
 const path   = require('path')
 const DB     = require('./db')
 const wallet = require('./wallet')
@@ -1066,37 +1066,56 @@ function setupDownloads(ses) {
 
     activeDownloads.set(id, item)
 
-    mainWindow?.webContents.send('download-started', {
+    const startData = {
       id,
       fileName,
       totalBytes,
       receivedBytes: 0,
       state: 'progressing',
       savePath: item.getSavePath(),
-    })
+    }
+
+    DB.addDownload(startData)
+
+    mainWindow?.webContents.send('download-started', startData)
 
     item.on('updated', (_event, state) => {
-      mainWindow?.webContents.send('download-updated', {
+      const updateData = {
         id,
         fileName,
         totalBytes,
         receivedBytes: item.getReceivedBytes(),
         state,
         savePath: item.getSavePath(),
-      })
+      }
+
+      DB.addDownload(updateData)
+
+      mainWindow?.webContents.send('download-updated', updateData)
     })
 
     item.once('done', (_event, state) => {
       activeDownloads.delete(id)
 
-      mainWindow?.webContents.send('download-done', {
+      const doneData = {
         id,
         fileName,
         totalBytes,
         receivedBytes: item.getReceivedBytes(),
         state,
         savePath: item.getSavePath(),
-      })
+      }
+
+      DB.addDownload(doneData)
+
+      try {
+        new Notification({
+          title: 'Download completed',
+          body: fileName,
+        }).show()
+      } catch (_) {}
+
+      mainWindow?.webContents.send('download-done', doneData)
     })
   })
 }
@@ -1424,6 +1443,17 @@ ipcMain.handle('set-tor-proxy', async (_, { enabled, host, port } = {}) => {
 
   return applyNetworkProxy()
 })
+ipcMain.handle('get-download-history', () => {
+  const items = DB.getDownloads()
+  console.log('[Downloads] history request', items)
+  return items
+})
+
+ipcMain.handle('clear-download-history', () => {
+  DB.clearDownloads()
+  return { ok: true }
+})
+
 ipcMain.handle('get-blocklist-info', () => ({
   size:  bl.getListSize(),
   ready: bl.isReady(),

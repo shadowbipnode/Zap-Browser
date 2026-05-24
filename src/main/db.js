@@ -12,6 +12,20 @@ function init() {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS downloads (
+      id TEXT PRIMARY KEY,
+      filename TEXT,
+      url TEXT,
+      path TEXT,
+      state TEXT,
+      received INTEGER DEFAULT 0,
+      total INTEGER DEFAULT 0,
+      created_at INTEGER
+    )
+  `)
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
@@ -372,9 +386,52 @@ module.exports = {
   init,
   getSetting, setSetting,
   getPrivacy, setPrivacy,
+  addDownload, getDownloads, clearDownloads,
   getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission, clearNostrPermissions,
   _db: () => db,
 }
+
+
+function addDownload(d) {
+  console.log('[DB] addDownload', d)
+
+  db.prepare(`
+    INSERT OR REPLACE INTO downloads
+    (id, filename, url, path, state, received, total, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    d.id,
+    d.fileName || d.filename || '',
+    d.url || '',
+    d.savePath || d.path || '',
+    d.state || '',
+    d.receivedBytes || d.received || 0,
+    d.totalBytes || d.total || 0,
+    Date.now()
+  )
+}
+
+function getDownloads() {
+  return db.prepare(`
+    SELECT
+      id,
+      filename AS fileName,
+      url,
+      path AS savePath,
+      state,
+      received AS receivedBytes,
+      total AS totalBytes,
+      created_at
+    FROM downloads
+    ORDER BY created_at DESC
+    LIMIT 200
+  `).all()
+}
+
+function clearDownloads() {
+  db.prepare('DELETE FROM downloads').run()
+}
+

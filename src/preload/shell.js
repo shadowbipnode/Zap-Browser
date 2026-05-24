@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('zap', {
   setTorProxy:      (a) => ipcRenderer.invoke('set-tor-proxy', a),
   showEditContextMenu: () => ipcRenderer.invoke('show-edit-context-menu'),
   showUAMenu: () => ipcRenderer.invoke('show-ua-menu'),
+  getDownloadHistory: () => ipcRenderer.invoke('get-download-history'),
+  clearDownloadHistory: () => ipcRenderer.invoke('clear-download-history'),
   getBlocklistInfo: () => ipcRenderer.invoke('get-blocklist-info'),
 
   // Value4Value
