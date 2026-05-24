@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('zap', {
   setDoh:           (a) => ipcRenderer.invoke('set-doh', a),
   setTorProxy:      (a) => ipcRenderer.invoke('set-tor-proxy', a),
   showEditContextMenu: () => ipcRenderer.invoke('show-edit-context-menu'),
+  showUAMenu: () => ipcRenderer.invoke('show-ua-menu'),
   getBlocklistInfo: () => ipcRenderer.invoke('get-blocklist-info'),
 
   // Value4Value
@@ -126,6 +127,7 @@ contextBridge.exposeInMainWorld('zap', {
       'bookmark-new-folder',
       'bookmark-new-folder-request',
       'bookmark-create-folder-request',
+      'ua-mode-updated',
       'bookmark-folder-picked',
     ]
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => {

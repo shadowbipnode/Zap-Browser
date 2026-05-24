@@ -138,6 +138,12 @@ export default function BrowserPage() {
       if (data.tabId === activeId && data.url) setAddrVal(data.url)
     })
     window.zap?.on('blocked-count', (n: number) => setBlocked(n))
+    window.zap?.on('ua-mode-updated', async () => {
+      const p = await window.zap?.getPrivacy()
+      setPrivacy(p)
+      setUaDrop(false)
+    })
+
     window.zap?.on('open-new-tab', ({ url }: any) => {
       const now = Date.now()
       const w = window as any
@@ -862,23 +868,13 @@ export default function BrowserPage() {
             title="WebRTC leak prevention">
             🔌 WebRTC
           </button>
-          <div style={{ position:'relative' }}>
-            <button className="priv-btn ua" onClick={() => setUaDrop(d => !d)}>
-              🎭 {privacy?.ua_mode === 'rotate' ? 'UA Auto' : 'UA Default'}
-            </button>
-            {uaDrop && (
-              <div className="ua-drop">
-                <button className={`ua-opt ${privacy?.ua_mode === 'rotate' ? 'active' : ''}`}
-                  onClick={() => setUAMode('rotate')}>🔄 Auto-rotate (consigliato)</button>
-                <button className={`ua-opt ${privacy?.ua_mode === 'default' ? 'active' : ''}`}
-                  onClick={() => setUAMode('default')}>🌐 Default browser</button>
-                <div className="ua-sep" />
-                <button className="ua-opt" onClick={async () => {
-                  await window.zap?.rotateUA(); setUaDrop(false)
-                }}>🎲 Ruota adesso</button>
-              </div>
-            )}
-          </div>
+          <button
+            className="priv-btn ua"
+            onClick={() => window.zap?.showUAMenu?.()}
+            title="User-Agent mode"
+          >
+            🎭 {privacy?.ua_mode === 'rotate' ? 'UA Auto' : 'UA Default'}
+          </button>
         </div>
 
         {/* NIP-07 indicator */}

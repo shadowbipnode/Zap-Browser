@@ -427,6 +427,7 @@ async function applyNetworkProxy() {
 
   if (!enabled) {
     await session.defaultSession.setProxy({ proxyRules: '' })
+    await session.defaultSession.forceReloadProxyConfig()
     return { ok: true, enabled: false }
   }
 
@@ -436,8 +437,17 @@ async function applyNetworkProxy() {
 
   await session.defaultSession.setProxy({
     proxyRules: `socks5://${host}:${port}`,
-    proxyBypassRules: '<-loopback>',
+    proxyBypassRules: [
+      '<-loopback>',
+      'localhost',
+      '127.0.0.1',
+      '::1',
+      'localhost:3000',
+      '127.0.0.1:3000',
+    ].join(';'),
   })
+
+  await session.defaultSession.forceReloadProxyConfig()
 
   return { ok: true, enabled: true, host, port }
 }
@@ -1318,6 +1328,49 @@ ipcMain.handle('show-edit-context-menu', () => {
     { role: 'paste', label: 'Paste' },
     { type: 'separator' },
     { role: 'selectAll', label: 'Select All' },
+  ])
+
+  menu.popup({ window: mainWindow })
+  return { ok: true }
+})
+
+ipcMain.handle('show-ua-menu', () => {
+  const { Menu } = require('electron')
+
+  const priv = DB.getPrivacy()
+  const current = priv?.ua_mode || 'rotate'
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'Auto-rotate',
+      type: 'radio',
+      checked: current === 'rotate',
+      click: () => {
+        DB.setPrivacy('ua_mode', 'rotate')
+        currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
+        session.defaultSession.setUserAgent(currentUA)
+        mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+      },
+    },
+    {
+      label: 'Default browser',
+      type: 'radio',
+      checked: current === 'default',
+      click: () => {
+        DB.setPrivacy('ua_mode', 'default')
+        session.defaultSession.setUserAgent('')
+        mainWindow?.webContents.send('ua-mode-updated', { mode: 'default', ua: '' })
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Rotate now',
+      click: () => {
+        currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
+        session.defaultSession.setUserAgent(currentUA)
+        mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+      },
+    },
   ])
 
   menu.popup({ window: mainWindow })
