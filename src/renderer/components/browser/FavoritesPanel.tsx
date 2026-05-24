@@ -150,6 +150,26 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     input.click()
   }
 
+  const exportHTML = async () => {
+    const res = await (window as any).zap?.exportFavoritesHtml?.()
+    if (!res?.html) return
+
+    const blob = new Blob([res.html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'zap-browser-bookmarks.html'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+
+    URL.revokeObjectURL(url)
+
+    setMsg('Bookmarks exported')
+    setTimeout(() => setMsg(''), 3000)
+  }
+
   const remove = async (f: Fav) => {
     const isFolder = Number(f.is_folder) === 1
     const ok = window.confirm(
@@ -337,6 +357,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
             style={{flex:1,padding:'8px 10px',borderRadius:'var(--r-md)',background:'var(--bg-2)',color:'var(--t0)',border:'1px solid var(--b1)',fontSize:12}}
           />
           <button className="act-btn" onClick={importHTML}>Import</button>
+          <button className="act-btn" onClick={exportHTML}>Export</button>
         </div>
 
         <div className="fav-list">

@@ -129,6 +129,32 @@ function init() {
   try { db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
   try { db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
 
+  // Legacy bookmarks migration:
+  // Older Zap Browser versions stored bookmarks directly at root without a
+  // dedicated bookmarks bar folder. Create the root folder and move legacy
+  // root items into it once.
+  try {
+    const bar = db
+      .prepare("SELECT id FROM favorites WHERE is_folder=1 AND lower(title) IN ('bookmarks bar', 'barra dei preferiti') LIMIT 1")
+      .get()
+
+    if (!bar) {
+      const info = db
+        .prepare("INSERT INTO favorites(title,url,favicon,parent_id,is_folder,sort_order,created_at) VALUES(?,?,?,?,?,?,?)")
+        .run('Bookmarks bar', '', null, null, 1, 0, Date.now())
+
+      const barId = info.lastInsertRowid
+
+      db.prepare(`
+        UPDATE favorites
+        SET parent_id = ?
+        WHERE parent_id IS NULL
+          AND id != ?
+      `).run(barId, barId)
+    }
+  } catch (_) {}
+
+
 migrateNwcConnectionsSchema()
 migratePrivacySettingsSchema()
 }

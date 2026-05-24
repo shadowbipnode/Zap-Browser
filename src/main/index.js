@@ -1692,6 +1692,56 @@ ipcMain.handle('move-favorite', (_, { id, parent_id }) => {
   return DB.moveFavorite(Number(id), parent_id === 'root' ? null : parent_id)
 })
 
+ipcMain.handle('export-favorites-html', () => {
+  const favorites = DB.getFavorites()
+  const byParent = {}
+
+  for (const item of favorites) {
+    const key = item.parent_id == null ? 'root' : String(item.parent_id)
+    if (!byParent[key]) byParent[key] = []
+    byParent[key].push(item)
+  }
+
+  for (const key of Object.keys(byParent)) {
+    byParent[key].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+  }
+
+  const esc = (s = '') => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+
+  const render = (parentId = null, depth = 1) => {
+    const key = parentId == null ? 'root' : String(parentId)
+    const items = byParent[key] || []
+    const pad = '    '.repeat(depth)
+    let out = `${pad}<DL><p>\n`
+
+    for (const item of items) {
+      if (Number(item.is_folder) === 1) {
+        out += `${pad}    <DT><H3>${esc(item.title || 'Folder')}</H3>\n`
+        out += render(item.id, depth + 1)
+      } else if (item.url) {
+        out += `${pad}    <DT><A HREF="${esc(item.url)}">${esc(item.title || item.url)}</A>\n`
+      }
+    }
+
+    out += `${pad}</DL><p>\n`
+    return out
+  }
+
+  const html = [
+    '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
+    '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+    '<TITLE>Bookmarks</TITLE>',
+    '<H1>Bookmarks</H1>',
+    render(null, 0),
+  ].join('\n')
+
+  return { ok: true, html }
+})
+
 ipcMain.handle('import-favorites-html', (_, { html }) => {
   V.assert(typeof html === 'string' && html.length <= 10_000_000, 'Invalid bookmarks HTML')
 
