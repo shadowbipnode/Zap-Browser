@@ -1509,6 +1509,15 @@ ipcMain.handle('nostr-import-nsec',    (_, args) => {
 })
 ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1'))
 ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
+ipcMain.handle('nostr-list-profiles',  () => nostr.listProfiles(DB))
+ipcMain.handle('nostr-set-active-profile', (_, { id }) => {
+  V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
+  return nostr.setActiveProfile(DB, Number(id))
+})
+ipcMain.handle('nostr-remove-profile-by-id', (_, { id }) => {
+  V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
+  return nostr.removeProfileById(DB, Number(id))
+})
 ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
 ipcMain.handle('nostr-list-permissions', () => DB.listNostrPermissions())
 ipcMain.handle('nostr-clear-permissions', () => DB.clearNostrPermissions())

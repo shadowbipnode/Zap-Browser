@@ -129,6 +129,22 @@ function init() {
   try { db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
   try { db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
 
+  // Nostr multi-profile migration
+  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN active INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN last_used_at INTEGER').run() } catch (_) {}
+  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_pubkey ON nostr_profile(pubkey)').run() } catch (_) {}
+
+  try {
+    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
+    const first = db.prepare('SELECT id FROM nostr_profile ORDER BY id ASC LIMIT 1').get()
+
+    if (!active && first) {
+      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?')
+        .run(Math.floor(Date.now() / 1000), first.id)
+    }
+  } catch (_) {}
+
+
   // Legacy bookmarks migration:
   // Older Zap Browser versions stored bookmarks directly at root without a
   // dedicated bookmarks bar folder. Create the root folder and move legacy

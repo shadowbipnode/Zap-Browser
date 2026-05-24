@@ -9,6 +9,7 @@ interface Profile {
 
 export default function NostrPanel({ onClose }: { onClose:()=>void }) {
   const [profile, setProfile] = useState<Profile|null>(null)
+  const [profiles, setProfiles] = useState<any[]>([])
   const [relays,  setRelays]  = useState<string[]>([])
   const [permissions, setPermissions] = useState<any[]>([])
   const [showImport, setShowImport] = useState(false)
@@ -20,6 +21,9 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
   const load = async () => {
     const p = await window.zap?.nostrGetProfile()
     setProfile(p || null)
+
+    const ps = await window.zap?.nostrListProfiles?.()
+    setProfiles(ps || [])
     const r = await window.zap?.nostrGetRelays()
     setRelays(Object.keys(r || {}))
     const perms = await window.zap?.nostrListPermissions()
@@ -128,6 +132,88 @@ export default function NostrPanel({ onClose }: { onClose:()=>void }) {
           </>
         ) : (
           <>
+            <div style={{
+              padding:12,
+              background:'var(--bg-3)',
+              border:'1px solid var(--b0)',
+              borderRadius:'var(--r-md)',
+              marginBottom:14,
+            }}>
+              <div className="sec-title" style={{ marginBottom:8 }}>
+                Profiles ({profiles.length})
+              </div>
+
+              {profiles.map((p:any) => (
+                <div
+                  key={p.id}
+                  style={{
+                    padding:'8px 0',
+                    borderBottom:'1px solid var(--b0)',
+                    display:'flex',
+                    alignItems:'center',
+                    justifyContent:'space-between',
+                    gap:8,
+                  }}
+                >
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:800,color:p.active ? 'var(--a)' : 'var(--t0)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {p.active ? '● ' : ''}{p.name || p.npub?.slice(0,22) + '...'}
+                    </div>
+                    <div style={{fontSize:10,color:'var(--t2)',fontFamily:'var(--mono)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {p.npub?.slice(0,28)}...
+                    </div>
+                  </div>
+
+                  <div style={{display:'flex',gap:6}}>
+                    {!p.active && (
+                      <button
+                        className="act-btn"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true)
+                          setError('')
+                          try {
+                            await window.zap?.nostrSetActiveProfile?.({ id: p.id })
+                            await load()
+                          } catch (err:any) {
+                            setError(err?.message || 'Failed to switch profile.')
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}
+                      >
+                        Switch
+                      </button>
+                    )}
+
+                    {profiles.length > 1 && (
+                      <button
+                        className="act-btn"
+                        disabled={busy}
+                        style={{color:'#fca5a5'}}
+                        onClick={async () => {
+                          const ok = window.confirm(`Remove Nostr profile "${p.name || p.npub}" from this browser?`)
+                          if (!ok) return
+                          setBusy(true)
+                          setError('')
+                          try {
+                            await window.zap?.nostrRemoveProfileById?.({ id: p.id })
+                            await load()
+                          } catch (err:any) {
+                            setError(err?.message || 'Failed to remove profile.')
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <div className="nostr-card">
               <div className="nostr-av">👤</div>
               <div>
