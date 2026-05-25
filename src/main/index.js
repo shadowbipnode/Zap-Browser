@@ -42,6 +42,7 @@ let mainWindow  = null
 let activeView  = null
 const tabViews  = new Map()
 const tabUrls   = new Map()
+const tabMeta   = new Map()
 let activeTabId = null
 let navigationOwnerTabId = null
 let isSwitching = false
@@ -467,14 +468,17 @@ function sendTabUpdated(tabId, patch = {}) {
   mainWindow.webContents.send('tab-updated', { tabId, ...patch })
 }
 
-function createMainView(tabId = null) {
+function createMainView(tabId = null, isPrivate = false) {
   const viewTabId = tabId
+  const partition = isPrivate && tabId ? `zap-private-${tabId}` : undefined
+
   const view = new BrowserView({
     webPreferences: {
       preload: path.join(__dirname, '../preload/webview.js'),
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
+      ...(partition ? { session: session.fromPartition(partition) } : {}),
     }
   })
 
@@ -529,7 +533,8 @@ function createMainView(tabId = null) {
 
     sendTabUpdated(ownerTabId, { loading: false, url, title })
 
-    if (url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
+    const meta = tabMeta.get(ownerTabId) || {}
+    if (!meta.private && url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
       DB.addHistory(url, title)
     }
 
@@ -1204,12 +1209,13 @@ ipcMain.handle('open-in-new-tab', (_, { url }) => {
 })
 
 // ── IPC: tabs ─────────────────────────────────────────────────────────────────
-ipcMain.handle('tab-create', (_, { tabId }) => {
+ipcMain.handle('tab-create', (_, { tabId, private: isPrivate = false }) => {
   tabUrls.set(tabId, '')
+  tabMeta.set(tabId, { private: !!isPrivate })
   activeTabId = tabId
 
   if (!tabViews.has(tabId)) {
-    tabViews.set(tabId, createMainView(tabId))
+    tabViews.set(tabId, createMainView(tabId, !!isPrivate))
   }
 
   if (activeView) hideView(mainWindow, activeView)
@@ -1233,7 +1239,8 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
 
   let view = tabViews.get(tabId)
   if (!view) {
-    view = createMainView(tabId)
+    const meta = tabMeta.get(tabId) || {}
+    view = createMainView(tabId, !!meta.private)
     tabViews.set(tabId, view)
   }
 
@@ -1265,7 +1272,8 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
 
   let view = tabViews.get(tabId)
   if (!view) {
-    view = createMainView(tabId)
+    const meta = tabMeta.get(tabId) || {}
+    view = createMainView(tabId, !!meta.private)
     tabViews.set(tabId, view)
   }
 
@@ -1285,10 +1293,19 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
 
 ipcMain.handle('tab-close', (_, { tabId }) => {
   tabUrls.delete(tabId)
+  const meta = tabMeta.get(tabId) || {}
+  tabMeta.delete(tabId)
 
   const view = tabViews.get(tabId)
   if (view) {
     try { hideView(mainWindow, view) } catch (_) {}
+    try {
+      if (meta.private) {
+        view.webContents.session.clearStorageData().catch(() => {})
+        view.webContents.session.clearCache().catch(() => {})
+      }
+    } catch (_) {}
+
     try { view.webContents.destroy() } catch (_) {}
     tabViews.delete(tabId)
   }
