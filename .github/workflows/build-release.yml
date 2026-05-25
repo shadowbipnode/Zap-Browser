@@ -64,7 +64,7 @@ jobs:
         run: npx vite build --config src/renderer/vite.config.ts
 
       - name: Build Windows installer and portable builds
-        run: npx electron-builder --win nsis portable zip --publish never
+        run: npx electron-builder --win nsis zip --publish never
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
