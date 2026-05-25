@@ -91,26 +91,41 @@ jobs:
           cat > RELEASE_NOTES.md <<NOTES
           # ⚡ Zap Browser ${{ github.ref_name }}
 
-          Automated cross-platform beta release.
+          Major privacy, Tor, private browsing and native browser UX beta release.
 
           ## Highlights
 
-          - Lightning payment confirmation before sending sats
-          - Payment sent confirmation popup with amount and preimage preview
-          - Real-time incoming sats notifications while browsing
-          - Strict IPC validation hardening across sensitive channels
-          - SECURITY.md responsible disclosure policy
-          - Improved address bar suggestions with favicon support
-          - Better BrowserView layering for dropdowns and browser UI
-          - Refreshed app icon and packaging assets
-          - Improved popup/interstitial blocking behavior
-          - Theme polish and UI refinements
+          - Ephemeral private tabs with isolated sessions
+          - Tor support across normal and private sessions
+          - Hardened Tor proxy handling and proxy reset behavior
+          - Session-based anti-fingerprinting profiles
+          - Canvas, WebGL, navigator, timezone and hardware fingerprint mitigations
+          - Reduced page loading flicker on ad/CMP-heavy websites
+          - Network-level early blocking for common ad and consent providers
+          - Improved tab loading state stability
+          - Multi-profile Nostr identity support
+          - Persistent per-site NIP-07 permission handling
+          - Drag-and-drop tab reordering
+          - Bookmark folders, import/export and legacy migration support
+          - Persistent download history
+          - Portable-mode passphrase encryption backend
+          - Updated Linux packaging metadata and icon handling
+
+          ## Privacy
+
+          - Private tabs no longer persist browsing history
+          - Private sessions clean cache/storage on close
+          - WebRTC leak protection remains enabled
+          - User-Agent rotation and fingerprint profile selection are applied per session
+          - Tor routing is applied consistently to default and isolated sessions
 
           ## Security
 
-          - Hardened IPC payload validation
-          - Improved Nostr/NWC/LNURL/Cashu input checks
-          - Safer Lightning payment flow with explicit user confirmation
+          - AES-256-GCM encrypted local secrets
+          - Runtime key support for portable mode
+          - Passphrase-derived portable encryption backend
+          - Safer Nostr/NWC secret handling
+          - Explicit NIP-07/NIP-04 permission model
 
           ## Builds
 
@@ -132,7 +147,7 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: Zap Browser ${{ github.ref_name }} — Security, Lightning UX & Browser Polish
+          name: Zap Browser ${{ github.ref_name }} — Privacy, Tor & Native Browser UX
           body_path: RELEASE_NOTES.md
           files: |
             release-artifacts/**/*.AppImage
