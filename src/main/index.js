@@ -529,37 +529,65 @@ function parseNativePaymentUrl(rawUrl) {
   return null
 }
 
-async function applyNetworkProxy() {
+function getTorProxyConfig() {
   const priv = DB.getPrivacy()
   const enabled = Number(priv?.tor_enabled) === 1
   const host = String(priv?.tor_host || '127.0.0.1').trim()
   const port = Number(priv?.tor_port || 9050)
 
-  if (!enabled) {
-    await session.defaultSession.setProxy({ proxyRules: '' })
-    await session.defaultSession.forceReloadProxyConfig()
+  if (!enabled) return { enabled: false }
+
+  if (!host || !Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    return { enabled: false, error: 'Invalid Tor/SOCKS proxy settings' }
+  }
+
+  return {
+    enabled: true,
+    host,
+    port,
+    config: {
+      proxyRules: `socks5://${host}:${port}`,
+      proxyBypassRules: [
+        '<-loopback>',
+        'localhost',
+        '127.0.0.1',
+        '::1',
+        'localhost:3000',
+        '127.0.0.1:3000',
+      ].join(';'),
+    },
+  }
+}
+
+async function applyProxyToSession(ses) {
+  const tor = getTorProxyConfig()
+
+  if (tor.error) return { ok: false, error: tor.error }
+
+  if (!tor.enabled) {
+    await ses.setProxy({ proxyRules: '' })
+    await ses.forceReloadProxyConfig()
     return { ok: true, enabled: false }
   }
 
-  if (!host || !Number.isSafeInteger(port) || port < 1 || port > 65535) {
-    return { ok: false, error: 'Invalid Tor/SOCKS proxy settings' }
+  await ses.setProxy(tor.config)
+  await ses.forceReloadProxyConfig()
+
+  return { ok: true, enabled: true, host: tor.host, port: tor.port }
+}
+
+async function applyNetworkProxy() {
+  const result = await applyProxyToSession(session.defaultSession)
+
+  for (const view of tabViews.values()) {
+    try {
+      if (!view?.webContents?.isDestroyed()) {
+        await applyProxyToSession(view.webContents.session)
+      }
+    } catch (_) {}
   }
 
-  await session.defaultSession.setProxy({
-    proxyRules: `socks5://${host}:${port}`,
-    proxyBypassRules: [
-      '<-loopback>',
-      'localhost',
-      '127.0.0.1',
-      '::1',
-      'localhost:3000',
-      '127.0.0.1:3000',
-    ].join(';'),
-  })
-
-  await session.defaultSession.forceReloadProxyConfig()
-
-  return { ok: true, enabled: true, host, port }
+  return result
 }
 
 function sendTabUpdated(tabId, patch = {}) {
@@ -681,30 +709,8 @@ function createMainView(tabId = null, isPrivate = false) {
   setupPrivacy(viewSession)
   setupDownloads(viewSession)
 
-  // Apply Tor proxy also to isolated private sessions.
-  try {
-    const priv = DB.getPrivacy()
-    const torEnabled = Number(priv?.tor_enabled) === 1
-
-    if (torEnabled) {
-      const host = String(priv?.tor_host || '127.0.0.1').trim()
-      const port = Number(priv?.tor_port || 9050)
-
-      viewSession.setProxy({
-        proxyRules: `socks5://${host}:${port}`,
-        proxyBypassRules: [
-          '<-loopback>',
-          'localhost',
-          '127.0.0.1',
-          '::1',
-          'localhost:3000',
-          '127.0.0.1:3000',
-        ].join(';'),
-      }).catch(() => {})
-
-      viewSession.forceReloadProxyConfig().catch(() => {})
-    }
-  } catch (_) {}
+  // Apply Tor/proxy policy also to isolated private sessions.
+  applyProxyToSession(viewSession).catch(() => {})
 
   const view = new BrowserView({
     webPreferences: {
