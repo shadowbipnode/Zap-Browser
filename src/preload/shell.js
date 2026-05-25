@@ -2,6 +2,10 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('zap', {
+  portableStatus: () => ipcRenderer.invoke('portable-status'),
+  portableSetupPassphrase: (a) => ipcRenderer.invoke('portable-setup-passphrase', a),
+  portableUnlock: (a) => ipcRenderer.invoke('portable-unlock', a),
+
   // Window controls
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),

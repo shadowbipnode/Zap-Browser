@@ -1,5 +1,6 @@
 'use strict'
 const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell, Notification } = require('electron')
+const portable = require('./portable')
 const path   = require('path')
 const DB     = require('./db')
 const wallet = require('./wallet')
@@ -1440,6 +1441,21 @@ function createWindow() {
   })
 }
 
+
+// ── IPC: portable mode ────────────────────────────────────────────────────────
+ipcMain.handle('portable-status', () => ({
+  portable: portable.isPortableMode(),
+  configured: portable.hasPortableConfig(),
+}))
+
+ipcMain.handle('portable-setup-passphrase', (_, { passphrase }) => {
+  return portable.setupPassphrase(passphrase)
+})
+
+ipcMain.handle('portable-unlock', (_, { passphrase }) => {
+  return portable.unlock(passphrase)
+})
+
 // ── IPC: window controls ──────────────────────────────────────────────────────
 ipcMain.on('win-minimize', () => mainWindow?.minimize())
 ipcMain.on('win-maximize', () =>
@@ -2238,6 +2254,8 @@ ipcMain.handle('reset-browser', () => {
   try { require('fs').unlinkSync(dbPath) } catch (_) {}
   return { ok: true }
 })
+
+portable.applyPortableUserDataPath()
 
 app.whenReady().then(createWindow)
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
