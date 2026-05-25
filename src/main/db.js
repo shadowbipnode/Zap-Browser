@@ -12,6 +12,20 @@ function init() {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS downloads (
+      id TEXT PRIMARY KEY,
+      filename TEXT,
+      url TEXT,
+      path TEXT,
+      state TEXT,
+      received INTEGER DEFAULT 0,
+      total INTEGER DEFAULT 0,
+      created_at INTEGER
+    )
+  `)
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
@@ -102,6 +116,9 @@ function init() {
       custom_ua      TEXT,
       doh_enabled    INTEGER NOT NULL DEFAULT 1,
       doh_provider   TEXT    NOT NULL DEFAULT 'https://cloudflare-dns.com/dns-query',
+      tor_enabled    INTEGER NOT NULL DEFAULT 0,
+      tor_host       TEXT    NOT NULL DEFAULT '127.0.0.1',
+      tor_port       INTEGER NOT NULL DEFAULT 9050,
       popup_block    INTEGER NOT NULL DEFAULT 1,
       overlay_block  INTEGER NOT NULL DEFAULT 1
     );
@@ -111,6 +128,59 @@ function init() {
   try { db.prepare('ALTER TABLE favorites ADD COLUMN parent_id INTEGER').run() } catch (_) {}
   try { db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
   try { db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+
+  // Nostr multi-profile migration
+  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN active INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN last_used_at INTEGER').run() } catch (_) {}
+  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_pubkey ON nostr_profile(pubkey)').run() } catch (_) {}
+
+  // NIP-07 permissions per active Nostr profile
+  try { db.prepare('ALTER TABLE nostr_permissions ADD COLUMN profile_id INTEGER').run() } catch (_) {}
+  try {
+    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
+    if (active) {
+      db.prepare('UPDATE nostr_permissions SET profile_id=? WHERE profile_id IS NULL').run(active.id)
+    }
+  } catch (_) {}
+  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_permissions_profile_origin_action ON nostr_permissions(profile_id, origin, action)').run() } catch (_) {}
+
+
+  try {
+    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
+    const first = db.prepare('SELECT id FROM nostr_profile ORDER BY id ASC LIMIT 1').get()
+
+    if (!active && first) {
+      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?')
+        .run(Math.floor(Date.now() / 1000), first.id)
+    }
+  } catch (_) {}
+
+
+  // Legacy bookmarks migration:
+  // Older Zap Browser versions stored bookmarks directly at root without a
+  // dedicated bookmarks bar folder. Create the root folder and move legacy
+  // root items into it once.
+  try {
+    const bar = db
+      .prepare("SELECT id FROM favorites WHERE is_folder=1 AND lower(title) IN ('bookmarks bar', 'barra dei preferiti') LIMIT 1")
+      .get()
+
+    if (!bar) {
+      const info = db
+        .prepare("INSERT INTO favorites(title,url,favicon,parent_id,is_folder,sort_order,created_at) VALUES(?,?,?,?,?,?,?)")
+        .run('Bookmarks bar', '', null, null, 1, 0, Date.now())
+
+      const barId = info.lastInsertRowid
+
+      db.prepare(`
+        UPDATE favorites
+        SET parent_id = ?
+        WHERE parent_id IS NULL
+          AND id != ?
+      `).run(barId, barId)
+    }
+  } catch (_) {}
+
 
 migrateNwcConnectionsSchema()
 migratePrivacySettingsSchema()
@@ -155,10 +225,35 @@ function setSetting(key, value) {
 }
 
 // ── Privacy ───────────────────────────────────────────────────────────────────
+
+try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_enabled INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+try { db.prepare("ALTER TABLE privacy_settings ADD COLUMN tor_host TEXT NOT NULL DEFAULT '127.0.0.1'").run() } catch (_) {}
+try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_port INTEGER NOT NULL DEFAULT 9050').run() } catch (_) {}
+
+
+function ensurePrivacyMigrations() {
+  const cols = db.prepare("PRAGMA table_info(privacy_settings)").all().map(c => c.name)
+
+  if (!cols.includes('tor_enabled')) {
+    db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_enabled INTEGER NOT NULL DEFAULT 0').run()
+  }
+
+  if (!cols.includes('tor_host')) {
+    db.prepare("ALTER TABLE privacy_settings ADD COLUMN tor_host TEXT NOT NULL DEFAULT '127.0.0.1'").run()
+  }
+
+  if (!cols.includes('tor_port')) {
+    db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_port INTEGER NOT NULL DEFAULT 9050').run()
+  }
+}
+
+
 function getPrivacy() {
+  ensurePrivacyMigrations()
   return db.prepare('SELECT * FROM privacy_settings WHERE id=1').get()
 }
 function setPrivacy(key, value) {
+  ensurePrivacyMigrations()
   db.prepare(`UPDATE privacy_settings SET ${key}=? WHERE id=1`).run(value)
   return getPrivacy()
 }
@@ -302,6 +397,11 @@ function clearHistory() {
 }
 
 // ── Nostr permissions ─────────────────────────────────────────────────────────
+function getActiveNostrProfileId() {
+  const row = db.prepare('SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1').get()
+  return row?.id || null
+}
+
 function getNostrPermission(origin, action) {
   return db
     .prepare('SELECT decision FROM nostr_permissions WHERE origin=? AND action=?')
@@ -323,20 +423,20 @@ function setNostrPermission(origin, action, decision) {
 
 function listNostrPermissions() {
   return db
-    .prepare('SELECT origin, action, decision, updated_at FROM nostr_permissions ORDER BY updated_at DESC')
+    .prepare('SELECT profile_id, origin, action, decision, updated_at FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) ORDER BY updated_at DESC')
     .all()
 }
 
 function removeNostrPermission(origin, action) {
   db
-    .prepare('DELETE FROM nostr_permissions WHERE origin=? AND action=?')
+    .prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) AND origin=? AND action=?')
     .run(origin, action)
 
   return { ok: true }
 }
 
 function clearNostrPermissions() {
-  db.prepare('DELETE FROM nostr_permissions').run()
+  db.prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1)').run()
   return { ok: true }
 }
 
@@ -344,9 +444,52 @@ module.exports = {
   init,
   getSetting, setSetting,
   getPrivacy, setPrivacy,
+  addDownload, getDownloads, clearDownloads,
   getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission, clearNostrPermissions,
   _db: () => db,
 }
+
+
+function addDownload(d) {
+  console.log('[DB] addDownload', d)
+
+  db.prepare(`
+    INSERT OR REPLACE INTO downloads
+    (id, filename, url, path, state, received, total, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    d.id,
+    d.fileName || d.filename || '',
+    d.url || '',
+    d.savePath || d.path || '',
+    d.state || '',
+    d.receivedBytes || d.received || 0,
+    d.totalBytes || d.total || 0,
+    Date.now()
+  )
+}
+
+function getDownloads() {
+  return db.prepare(`
+    SELECT
+      id,
+      filename AS fileName,
+      url,
+      path AS savePath,
+      state,
+      received AS receivedBytes,
+      total AS totalBytes,
+      created_at
+    FROM downloads
+    ORDER BY created_at DESC
+    LIMIT 200
+  `).all()
+}
+
+function clearDownloads() {
+  db.prepare('DELETE FROM downloads').run()
+}
+

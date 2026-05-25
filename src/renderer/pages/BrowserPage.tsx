@@ -1,5 +1,5 @@
 // src/renderer/pages/BrowserPage.tsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useBrowser } from '../store/browserStore'
 import WalletPanel    from '../components/wallet/WalletPanel'
 import NostrPanel     from '../components/nostr/NostrPanel'
@@ -18,13 +18,14 @@ interface TabState {
 
 export default function BrowserPage() {
   const { L } = useLang()
-  const { tabs, activeId, addTab, closeTab, setActive, updateTab, navigate } = useBrowser()
+  const { tabs, activeId, addTab, closeTab, setActive, reorderTabs, updateTab, navigate } = useBrowser()
   const [panel, setPanel]       = useState<Panel>(null)
   const [addrVal, setAddrVal]   = useState('')
   const [privacy, setPrivacy]   = useState<any>(null)
   const [uaDrop, setUaDrop]     = useState(false)
   const [blocked,  setBlocked]   = useState(0)
   const [favBar,      setFavBar]    = useState<any[]>([])
+  const favBarRootIdRef = useRef<any>(null)
   const [showFavBar,  setShowFavBar] = useState(() => localStorage.getItem('showFavBar') !== 'false')
   const [favDropOpen, setFavDropOpen] = useState(false)
   const [favFolderOpen, setFavFolderOpen] = useState<any>(null)
@@ -45,6 +46,7 @@ export default function BrowserPage() {
   const [suggestions, setSuggestions] = useState<any[]>([])
   const [showSuggest, setShowSuggest] = useState(false)
   const [selectedSuggest, setSelectedSuggest] = useState(-1)
+  const selectedSuggestRef = useRef(-1)
   const [appVersion, setAppVersion] = useState('')
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [showUpdatePopup, setShowUpdatePopup] = useState(false)
@@ -55,11 +57,25 @@ export default function BrowserPage() {
   const [downloadsOpen, setDownloadsOpen] = useState(false)
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
+  const [dragTabId, setDragTabId] = useState<string | null>(null)
+
 
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
   const isNew = !activeTab?.url || activeTab.url === 'zap://newtab' || activeTab.url === '' || activeTab.url === ''
 
+  const activeIdRef = useRef(activeId)
+
+  useEffect(() => {
+    activeIdRef.current = activeId
+  }, [activeId])
+
   // Load privacy settings
+  useEffect(() => {
+    window.zap?.getDownloadHistory?.().then((items:any[]) => {
+      if (Array.isArray(items)) setDownloads(items)
+    })
+  }, [])
+
   useEffect(() => {
     window.zap?.getPrivacy().then(setPrivacy)
     const loadFavBar = () => window.zap?.getFavorites().then((f: any[]) => setFavBar(f || []))
@@ -133,9 +149,15 @@ export default function BrowserPage() {
         canGoBack: data.canGoBack,
         canGoForward: data.canGoForward,
       })
-      if (data.tabId === activeId && data.url) setAddrVal(data.url)
+      if (data.tabId === activeIdRef.current && data.url) setAddrVal(data.url)
     })
     window.zap?.on('blocked-count', (n: number) => setBlocked(n))
+    window.zap?.on('ua-mode-updated', async () => {
+      const p = await window.zap?.getPrivacy()
+      setPrivacy(p)
+      setUaDrop(false)
+    })
+
     window.zap?.on('open-new-tab', ({ url }: any) => {
       const now = Date.now()
       const w = window as any
@@ -155,6 +177,13 @@ export default function BrowserPage() {
       setTimeout(() => setPopupBlocked(null), 4500)
     })
 
+    window.zap?.getDownloadHistory?.().then((items:any[]) => {
+      console.log('[Renderer] restored downloads', items)
+      if (Array.isArray(items)) {
+        setDownloads(items)
+      }
+    })
+
     window.zap?.on('download-started', (data: any) => {
       setDownloads(prev => [data, ...prev.filter(d => d.id !== data.id)])
       setDownloadsOpen(true)
@@ -167,6 +196,115 @@ export default function BrowserPage() {
     window.zap?.on('download-done', (data: any) => {
       setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
       setDownloadsOpen(true)
+
+      try {
+        new Notification('Download completed', {
+          body: data?.path || 'File downloaded successfully',
+        })
+      } catch (_) {}
+    })
+
+    window.zap?.on('address-suggestion-picked', (data: any) => {
+      if (!data?.url) return
+      setAddrVal(data.url)
+      setSuggestions([])
+      setShowSuggest(false)
+      selectedSuggestRef.current = -1
+      setSelectedSuggest(-1)
+      handleNavigate(data.url)
+    })
+
+    window.zap?.on('bookmark-open-new-tab', (bookmark: any) => {
+      if (!bookmark?.url) return
+
+      const now = Date.now()
+      const w = window as any
+      const key = `bookmark-open:${bookmark.url}`
+
+      if (w.__zapLastBookmarkActionKey === key && now - (w.__zapLastBookmarkActionAt || 0) < 1200) {
+        return
+      }
+
+      w.__zapLastBookmarkActionKey = key
+      w.__zapLastBookmarkActionAt = now
+
+      handleNewTab(bookmark.url)
+    })
+
+    window.zap?.on('bookmark-rename', (bookmark: any) => {
+      setFavRename(bookmark)
+      setFavRenameValue(bookmark?.title || '')
+    })
+
+    window.zap?.on('bookmark-delete', async (bookmark: any) => {
+      if (!bookmark?.id) return
+
+      const w = window as any
+      const key = `bookmark-delete:${bookmark.id}`
+
+      if (w.__zapBookmarkDeleteInProgress === key) {
+        return
+      }
+
+      w.__zapBookmarkDeleteInProgress = key
+
+      try {
+        const isFolder = Number(bookmark.is_folder) === 1
+        const name = bookmark.title || (isFolder ? 'this folder' : 'this bookmark')
+
+        const ok = window.confirm(
+          isFolder
+            ? `Delete folder "${name}" and all its contents?`
+            : `Delete bookmark "${name}"?`
+        )
+
+        if (!ok) return
+
+        await window.zap?.removeFavorite({ id: Number(bookmark.id) })
+
+        const f = await window.zap?.getFavorites()
+        setFavBar(f || [])
+
+        window.dispatchEvent(new Event('favorites-updated'))
+      } finally {
+        setTimeout(() => {
+          if (w.__zapBookmarkDeleteInProgress === key) {
+            w.__zapBookmarkDeleteInProgress = null
+          }
+        }, 800)
+      }
+    })
+
+    window.zap?.on('bookmark-folder-picked', (item: any) => {
+      const url = typeof item === 'string' ? item : item?.url
+
+      if (!url) return
+
+      window.zap?.hideBookmarkFolderPopup?.()
+      handleNavigate(url)
+    })
+
+    window.zap?.on('bookmark-create-folder-request', async (data: any) => {
+      console.log('[DEBUG][renderer] bookmark-create-folder-request received', data)
+      console.log('[BookmarksBar] create folder request received')
+
+      const title = window.prompt('Folder name', 'New folder')
+      if (!title?.trim()) return
+
+      const rootId = favBarRootIdRef.current ?? barRootId ?? null
+
+      await window.zap?.addFavorite({
+        title: title.trim(),
+        url: '',
+        favicon: null,
+        parent_id: rootId,
+        is_folder: 1,
+        sort_order: Date.now(),
+      })
+
+      const f = await window.zap?.getFavorites()
+      setFavBar(f || [])
+      window.dispatchEvent(new Event('favorites-updated'))
     })
 
     const onPaymentSuccess = (e: any) => {
@@ -278,11 +416,11 @@ export default function BrowserPage() {
   const togglePanel = (p: Panel) => setPanel(prev => prev === p ? null : p)
 
   // Create a new tab
-  const handleNewTab = useCallback((url?: string) => {
+  const handleNewTab = useCallback((url?: string, isPrivate = false) => {
     const id = crypto.randomUUID()
     const target = url || 'zap://newtab'
 
-    addTab(target, id)
+    addTab(target, id, isPrivate)
     setActive(id)
     setAddrVal(url || '')
     setShowSuggest(false)
@@ -295,7 +433,7 @@ export default function BrowserPage() {
       })
     }
 
-    window.zap?.tabCreate({ tabId: id }).then(() => {
+    window.zap?.tabCreate({ tabId: id, private: isPrivate }).then(() => {
       if (url && url !== 'zap://newtab') {
         window.zap?.tabNavigate({ tabId: id, url })
       } else {
@@ -326,15 +464,17 @@ export default function BrowserPage() {
 
   // Navigate
   const handleNavigate = useCallback((url: string) => {
-    if (!activeId) return
-    window.zap?.tabNavigate({ tabId: activeId, url }).then((res: any) => {
-      if (res?.url) updateTab(activeId, { url: res.url, loading: true })
+    const tabId = activeIdRef.current
+    if (!tabId) return
+
+    window.zap?.tabNavigate({ tabId, url }).then((res: any) => {
+      if (res?.url) updateTab(tabId, { url: res.url, loading: true })
     })
-  }, [activeId, updateTab])
+  }, [updateTab])
 
   const handleAddrInput = async (val: string) => {
     setAddrVal(val)
-    if (val.length < 2) { setSuggestions([]); setShowSuggest(false); return }
+    if (val.length < 2) { setSuggestions([]); setShowSuggest(false); window.zap?.hideAddressSuggestions?.(); return }
     try {
       const hist = await (window as any).zap?.getHistory({ limit: 500 }) || []
       const q = val.toLowerCase()
@@ -352,44 +492,94 @@ export default function BrowserPage() {
             seen.add(domain)
             // Mostra homepage del dominio, non la pagina specifica
             const homeUrl = new URL(h.url).origin
-            found.push({ ...h, url: homeUrl, title: domain })
+            found.push({
+              ...h,
+              url: homeUrl,
+              title: domain,
+              favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`
+            })
           }
         } catch(_) {}
         if (found.length >= 7) break
       }
       setSuggestions(found)
-      setShowSuggest(found.length > 0)
-      setSelectedSuggest(found.length > 0 ? 0 : -1)
+      setShowSuggest(false)
+      selectedSuggestRef.current = found.length > 0 ? 0 : -1
+      setSelectedSuggest(selectedSuggestRef.current)
+
+      if (found.length > 0) {
+        const el = document.activeElement as HTMLElement | null
+        const rect = el?.getBoundingClientRect?.()
+
+        if (rect) {
+          await window.zap?.showAddressSuggestions?.({
+            items: found,
+            selectedIndex: selectedSuggestRef.current,
+            x: window.screenX + rect.left,
+            y: window.screenY + rect.bottom + 8,
+            width: rect.width,
+          })
+        }
+      } else {
+        await window.zap?.hideAddressSuggestions?.()
+      }
     } catch(e) { console.error('[history] errore:', e) }
+  }
+
+  const refreshNativeSuggestions = async (items:any[], selectedIndex:number) => {
+    const el = document.activeElement as HTMLElement | null
+    const rect = el?.getBoundingClientRect?.()
+
+    if (!rect || !items.length) return
+
+    await window.zap?.showAddressSuggestions?.({
+      items,
+      selectedIndex,
+      x: window.screenX + rect.left,
+      y: window.screenY + rect.bottom + 8,
+      width: rect.width,
+    })
   }
 
   const handleAddrKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
       setShowSuggest(false)
+      selectedSuggestRef.current = -1
       setSelectedSuggest(-1)
+      setSuggestions([])
+      window.zap?.hideAddressSuggestions?.()
       return
     }
 
-    if (showSuggest && suggestions.length > 0) {
+    if (suggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSelectedSuggest(v => v < suggestions.length - 1 ? v + 1 : 0)
+        const next = selectedSuggestRef.current < suggestions.length - 1 ? selectedSuggestRef.current + 1 : 0
+        selectedSuggestRef.current = next
+        setSelectedSuggest(next)
+        refreshNativeSuggestions(suggestions, next)
         return
       }
 
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSelectedSuggest(v => v > 0 ? v - 1 : suggestions.length - 1)
+        const next = selectedSuggestRef.current > 0 ? selectedSuggestRef.current - 1 : suggestions.length - 1
+        selectedSuggestRef.current = next
+        setSelectedSuggest(next)
+        refreshNativeSuggestions(suggestions, next)
         return
       }
 
       if (e.key === 'Enter' && selectedSuggest >= 0) {
         e.preventDefault()
-        const item = suggestions[selectedSuggest]
+        const item = suggestions[selectedSuggestRef.current]
         if (item?.url) {
           setAddrVal(item.url)
           setShowSuggest(false)
+          selectedSuggestRef.current = -1
           setSelectedSuggest(-1)
+          setSuggestions([])
+          window.zap?.hideAddressSuggestions?.()
           handleNavigate(item.url)
           return
         }
@@ -400,6 +590,7 @@ export default function BrowserPage() {
 
     setShowSuggest(false)
     setSelectedSuggest(-1)
+    window.zap?.hideAddressSuggestions?.()
 
     const v = addrVal.trim()
 
@@ -560,19 +751,49 @@ export default function BrowserPage() {
       {/* ── Tab bar ──────────────────────────────────────────────────── */}
       <div className="tabbar">
         {tabs.map(t => (
-          <div key={t.id} className={`tab ${t.id === activeId ? 'active' : ''}`}
-            onClick={() => handleSwitchTab(t.id)}>
+          <div
+            key={t.id}
+            draggable
+            className={`tab ${t.id === activeId ? 'active' : ''} ${t.private ? 'private' : ''} ${dragTabId === t.id ? 'dragging' : ''}`}
+            onDragStart={(e) => {
+              setDragTabId(t.id)
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', t.id)
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              const fromId = e.dataTransfer.getData('text/plain') || dragTabId
+              if (fromId && fromId !== t.id) {
+                reorderTabs(fromId, t.id)
+              }
+              setDragTabId(null)
+            }}
+            onDragEnd={() => setDragTabId(null)}
+            onClick={() => handleSwitchTab(t.id)}
+          >
             <span className="tab-icon">
-              {t.favicon ? (
+              {t.private ? '🕶' : t.favicon ? (
                 <img src={t.favicon} alt="" style={{width:14,height:14,borderRadius:3}} />
               ) : '🌐'}
             </span>
-            <span className="tab-label">{t.loading ? L('Caricamento...','Loading...') : t.title || L('Nuova Scheda','New Tab')}</span>
+            <span className="tab-label">{t.private ? '🕶 PRIVATE · ' : ''}{t.loading ? L('Caricamento...','Loading...') : t.title || L('Nuova Scheda','New Tab')}</span>
             <button className="tab-x" onClick={e => { e.stopPropagation(); handleCloseTab(t.id) }}>×</button>
           </div>
         ))}
-        <button className="tab-new" onClick={() => handleNewTab()}>+</button>
+        <button className="tab-new" title="New tab" onClick={() => handleNewTab()}>+</button>
+        <button className="tab-new private-newtab" title="New private tab" onClick={() => handleNewTab(undefined, true)}>🕶</button>
       </div>
+
+      {activeTab?.private && (
+        <div className="private-strip">
+          <span>🕶 PRIVATE SESSION</span>
+          <span>No history saved · isolated session</span>
+        </div>
+      )}
 
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div className="toolbar">
@@ -660,12 +881,39 @@ export default function BrowserPage() {
             value={addrVal}
             onChange={e => handleAddrInput(e.target.value)}
             onKeyDown={handleAddrKey}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              window.zap?.showEditContextMenu?.()
+            }}
             onFocus={e => e.target.select()}
             placeholder={L('Cerca o inserisci URL, invoice Lightning, token Cashu...','Search or enter URL, Lightning invoice, Cashu token...')}
             spellCheck={false}
             autoFocus
           />
         </div>
+
+        <button
+          title="Save bookmark"
+          onClick={() => {
+            if (!activeTab?.url || activeTab.url === 'zap://newtab') return
+            setBookmarkTitle(activeTab?.title || activeTab?.url || '')
+            setBookmarkFolder('root')
+            setBookmarkNewFolderName('')
+            setShowBookmarkSave(true)
+          }}
+          style={{
+            background:'none',
+            border:'none',
+            color:'var(--t2)',
+            cursor:'pointer',
+            fontSize:15,
+            padding:'0 8px',
+            flexShrink:0,
+          }}
+        >
+          🔖
+        </button>
 
         {/* Site permissions are shown inside the Nostr side panel */}
 
@@ -679,23 +927,13 @@ export default function BrowserPage() {
             title="WebRTC leak prevention">
             🔌 WebRTC
           </button>
-          <div style={{ position:'relative' }}>
-            <button className="priv-btn ua" onClick={() => setUaDrop(d => !d)}>
-              🎭 {privacy?.ua_mode === 'rotate' ? 'UA Auto' : 'UA Default'}
-            </button>
-            {uaDrop && (
-              <div className="ua-drop">
-                <button className={`ua-opt ${privacy?.ua_mode === 'rotate' ? 'active' : ''}`}
-                  onClick={() => setUAMode('rotate')}>🔄 Auto-rotate (consigliato)</button>
-                <button className={`ua-opt ${privacy?.ua_mode === 'default' ? 'active' : ''}`}
-                  onClick={() => setUAMode('default')}>🌐 Default browser</button>
-                <div className="ua-sep" />
-                <button className="ua-opt" onClick={async () => {
-                  await window.zap?.rotateUA(); setUaDrop(false)
-                }}>🎲 Ruota adesso</button>
-              </div>
-            )}
-          </div>
+          <button
+            className="priv-btn ua"
+            onClick={() => window.zap?.showUAMenu?.()}
+            title="User-Agent mode"
+          >
+            🎭 {privacy?.ua_mode === 'rotate' ? 'UA Auto' : 'UA Default'}
+          </button>
         </div>
 
         {/* NIP-07 indicator */}
@@ -727,25 +965,35 @@ export default function BrowserPage() {
         )}
 
         <button
-          title="Save bookmark"
-          onClick={() => {
-            if (!activeTab?.url || activeTab.url === 'zap://newtab') return
-            setBookmarkTitle(activeTab?.title || activeTab?.url || '')
-            setBookmarkFolder('root')
-            setBookmarkNewFolderName('')
-            setShowBookmarkSave(true)
+          title={privacy?.tor_enabled ? 'Tor enabled' : 'Tor disabled'}
+          onClick={async () => {
+            try {
+              await window.zap?.setTorProxy({
+                enabled: !privacy?.tor_enabled,
+                host: privacy?.tor_host || '127.0.0.1',
+                port: privacy?.tor_port || 9050,
+              })
+
+              const p = await window.zap?.getPrivacy()
+              setPrivacy(p)
+            } catch (err) {
+              console.error('[Tor] toggle failed', err)
+              window.alert('Tor toggle failed')
+            }
           }}
           style={{
-            background:'none',
-            border:'none',
-            color:'var(--t2)',
+            background: privacy?.tor_enabled ? 'rgba(168,85,247,.16)' : 'none',
+            border: privacy?.tor_enabled ? '1px solid rgba(168,85,247,.45)' : 'none',
+            color: privacy?.tor_enabled ? '#c084fc' : 'var(--t2)',
             cursor:'pointer',
-            fontSize:15,
-            padding:'0 8px',
+            fontSize:16,
+            padding:'4px 10px',
+            borderRadius:999,
             flexShrink:0,
+            transition:'all .18s ease',
           }}
         >
-          ⭐
+          🧅
         </button>
 
         <button
@@ -918,7 +1166,12 @@ export default function BrowserPage() {
                     const folderName = bookmarkNewFolderName.trim()
                     if (!folderName) return
 
-                    const created = await window.zap?.addFavorite({
+                    console.log('[FavBar] creating folder', {
+            ref: favBarRootIdRef.current,
+            root: barRootId,
+          })
+
+          const created = await window.zap?.addFavorite({
                       title: folderName,
                       url: '',
                       favicon: null,
@@ -993,27 +1246,54 @@ export default function BrowserPage() {
         })
 
         const createFolderInBar = async () => {
-          const created = await window.zap?.addFavorite({
-            title: 'New folder',
-            url: '',
-            favicon: null,
-            parent_id: barRootId,
-            is_folder: 1,
-            sort_order: Date.now()
-          })
+          try {
+            console.log('[FavBar] plus/create folder clicked')
 
-          const f = await window.zap?.getFavorites()
-          setFavBar(f || [])
-          window.dispatchEvent(new Event('favorites-updated'))
+            let rootId = favBarRootIdRef.current ?? barRootId ?? null
 
-          const createdId = created?.id
-          const createdFolder = createdId
-            ? (f || []).find((item:any) => item.id === createdId)
-            : null
+            // If the bookmarks bar root is missing, create it once.
+            if (!rootId) {
+              const root = await window.zap?.addFavorite({
+                title: 'Bookmarks Bar',
+                url: '',
+                favicon: null,
+                parent_id: null,
+                is_folder: 1,
+                sort_order: 0,
+              })
 
-          if (createdFolder) {
-            setFavRename(createdFolder)
-            setFavRenameValue(createdFolder.title || 'New folder')
+              rootId = root?.id ?? null
+              favBarRootIdRef.current = rootId
+            }
+
+            const created = await window.zap?.addFavorite({
+              title: 'New folder',
+              url: '',
+              favicon: null,
+              parent_id: rootId,
+              is_folder: 1,
+              sort_order: Date.now(),
+            })
+
+            console.log('[FavBar] created folder result', created)
+
+            const f = await window.zap?.getFavorites()
+            setFavBar(f || [])
+            window.dispatchEvent(new Event('favorites-updated'))
+
+            const createdFolder = created?.id
+              ? (f || []).find((item:any) => Number(item.id) === Number(created.id))
+              : null
+
+            if (createdFolder) {
+              setFavRename(createdFolder)
+              setFavRenameValue(createdFolder.title || 'New folder')
+            } else {
+              window.alert('Folder created, but could not open rename dialog.')
+            }
+          } catch (err:any) {
+            console.error('[FavBar] create folder failed', err)
+            window.alert('Create folder failed: ' + (err?.message || err))
           }
         }
 
@@ -1022,9 +1302,21 @@ export default function BrowserPage() {
 
         const getChildren = (id:any) => byParent[String(id)] || []
 
-        const openFav = (f:any) => {
+        const openFav = async (f:any, e?:any) => {
           if (Number(f.is_folder) === 1) {
-            setFavFolderOpen(favFolderOpen === f.id ? null : f.id)
+            const children = getChildren(f.id)
+            const rect = e?.currentTarget?.getBoundingClientRect?.()
+
+            if (rect) {
+              await window.zap?.showBookmarkFolderPopup?.({
+                folder: f,
+                items: children,
+                x: window.screenX + rect.left,
+                y: window.screenY + rect.bottom + 6,
+              })
+            }
+
+            setFavFolderOpen(null)
             setFavDropOpen(false)
             return
           }
@@ -1032,6 +1324,7 @@ export default function BrowserPage() {
           handleNavigate(f.url)
           setFavFolderOpen(null)
           setFavDropOpen(false)
+          window.zap?.hideBookmarkFolderPopup?.()
         }
 
         const renderMenuItems = (items:any[], depth = 0): any[] => {
@@ -1048,7 +1341,7 @@ export default function BrowserPage() {
                   setFavFolderOpen(null)
                   setFavDropOpen(false)
                 }}
-                onContextMenu={(e) => {
+                onContextMenu={async (e) => {
                   e.preventDefault()
                   e.stopPropagation()
                   setFavContext({
@@ -1097,18 +1390,32 @@ export default function BrowserPage() {
         return (
           <div
             data-zap-favbar="1"
-            onContextMenu={(e) => {
+            onContextMenu={async (e) => {
               const target = e.target as HTMLElement
               if (target.closest('[data-zap-favitem="1"]')) return
 
               e.preventDefault()
               e.stopPropagation()
-              setFavContext({
-                x: e.clientX,
-                y: e.clientY,
-                item: null,
-                type: 'bar'
-              })
+
+              const title = window.prompt('Folder name', 'New folder')
+
+              if (title?.trim()) {
+                const rootId = favBarRootIdRef.current ?? barRootId ?? null
+
+                await window.zap?.addFavorite({
+                  title: title.trim(),
+                  url: '',
+                  favicon: null,
+                  parent_id: rootId,
+                  is_folder: 1,
+                  sort_order: Date.now(),
+                })
+
+                const f = await window.zap?.getFavorites()
+                setFavBar(f || [])
+                window.dispatchEvent(new Event('favorites-updated'))
+              }
+
               setFavFolderOpen(null)
               setFavDropOpen(false)
             }}
@@ -1120,9 +1427,9 @@ export default function BrowserPage() {
             }}
           >
             <button
-              onClick={() => {
+              onClick={async () => {
                 console.log('[FavBar] plus clicked')
-                createFolderInBar()
+                await createFolderInBar()
               }}
               title="Nuova cartella preferiti"
               style={{
@@ -1149,17 +1456,14 @@ export default function BrowserPage() {
                     data-zap-favitem="1"
                     onClick={(e) => {
                       e.stopPropagation()
-                      openFav(f)
+                      openFav(f, e)
                     }}
-                    onContextMenu={(e) => {
+                    onContextMenu={async (e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      setFavContext({
-                        x: e.clientX,
-                        y: e.clientY,
-                        item: f,
-                        type: isFolder ? 'folder' : 'bookmark'
-                      })
+
+                      window.zap?.showBookmarkContextMenu?.(f)
+
                       setFavFolderOpen(null)
                       setFavDropOpen(false)
                     }}
@@ -1182,27 +1486,7 @@ export default function BrowserPage() {
                     {isFolder ? '📁' : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
                   </button>
 
-                  {isFolder && favFolderOpen === f.id && (
-                    <div style={{
-                      position:'absolute',
-                      top:24,
-                      left:0,
-                      zIndex:9999,
-                      background:'var(--bg-1)',
-                      border:'1px solid var(--b1)',
-                      borderRadius:'var(--r-md)',
-                      boxShadow:'0 8px 32px rgba(0,0,0,.45)',
-                      minWidth:240,
-                      maxWidth:360,
-                      maxHeight:360,
-                      overflowY:'auto',
-                      padding:'4px 0',
-                    }}>
-                      {children.length === 0
-                        ? <div style={{fontSize:12,color:'var(--t2)',padding:'8px 12px'}}>Cartella vuota</div>
-                        : renderMenuItems(children)}
-                    </div>
-                  )}
+
                 </div>
               )
             })}

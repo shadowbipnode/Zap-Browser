@@ -1,5 +1,6 @@
 'use strict'
-const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell } = require('electron')
+const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell, Notification } = require('electron')
+const portable = require('./portable')
 const path   = require('path')
 const DB     = require('./db')
 const wallet = require('./wallet')
@@ -20,15 +21,142 @@ const {
   resizeView,
 } = require('./browser/viewManager')
 
+const {
+  setupWebViewContextMenu,
+} = require('./ui/nativeMenus')
+
+const {
+  showBookmarkContextMenu,
+} = require('./ui/bookmarkMenus')
+
+const {
+  showBookmarkFolderPopup,
+  hideBookmarkFolderPopup,
+} = require('./ui/bookmarkFolderPopup')
+
+
+
 const isDev = !app.isPackaged
 const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
+
+app.commandLine.appendSwitch(
+  'disable-features',
+  [
+    'UserAgentClientHint',
+    'AcceptCHFrame',
+    'MediaRouter',
+    'OptimizationHints',
+    'AutofillServerCommunication',
+    'PrivacySandboxSettings4',
+  ].join(',')
+)
+
+app.commandLine.appendSwitch('disable-rtc-smoothness-algorithm')
+
+app.commandLine.appendSwitch(
+  'js-flags',
+  '--random-seed=1157259157'
+)
+
+app.commandLine.appendSwitch(
+  'force-dark-mode'
+)
+
+
+
+
+app.commandLine.appendSwitch(
+  'disable-features',
+  [
+    'UserAgentClientHint',
+    'AcceptCHFrame',
+    'MediaRouter',
+    'OptimizationHints',
+    'AutofillServerCommunication',
+    'PrivacySandboxSettings4',
+  ].join(',')
+)
+
+app.commandLine.appendSwitch('disable-rtc-smoothness-algorithm')
+
+app.commandLine.appendSwitch(
+  'js-flags',
+  '--random-seed=1157259157'
+)
+
+app.commandLine.appendSwitch('force-dark-mode')
+
+
+
 let mainWindow  = null
 let activeView  = null
+const tabViews  = new Map()
 const tabUrls   = new Map()
+const tabMeta   = new Map()
 let activeTabId = null
+let navigationOwnerTabId = null
 let isSwitching = false
 const activeDownloads = new Map()
+const lastTabUpdates = new Map()
+
+const FINGERPRINT_PROFILES = [
+  {
+    name: 'linux-chrome-utc',
+    platform: 'Linux x86_64',
+    hardwareConcurrency: 4,
+    deviceMemory: 4,
+    timezone: 'UTC',
+    timezoneOffset: 0,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Intel, Mesa Intel UHD Graphics, OpenGL 4.6)',
+  },
+  {
+    name: 'linux-chrome-eu',
+    platform: 'Linux x86_64',
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    timezone: 'Europe/Rome',
+    timezoneOffset: -120,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Intel, Mesa Intel UHD Graphics, OpenGL 4.6)',
+  },
+  {
+    name: 'windows-chrome-utc',
+    platform: 'Win32',
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    timezone: 'UTC',
+    timezoneOffset: 0,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0)',
+  },
+  {
+    name: 'mac-chrome-utc',
+    platform: 'MacIntel',
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    timezone: 'UTC',
+    timezoneOffset: 0,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1)',
+  },
+]
+
+const fingerprintProfile =
+  FINGERPRINT_PROFILES[Math.floor(Math.random() * FINGERPRINT_PROFILES.length)]
+
+console.log('[Fingerprint] active profile:', fingerprintProfile.name)
+
+let addressSuggestWindow = null
 
 
 const UA_POOL = [
@@ -39,6 +167,197 @@ const UA_POOL = [
 ]
 let currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
 const nostrSessionPermissions = new Map()
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function hideAddressSuggestions() {
+  if (addressSuggestWindow && !addressSuggestWindow.isDestroyed()) {
+    addressSuggestWindow.hide()
+  }
+}
+
+function showAddressSuggestions({ items = [], x = 0, y = 0, width = 720, selectedIndex = 0 }) {
+  if (!mainWindow || !Array.isArray(items) || items.length === 0) {
+    hideAddressSuggestions()
+    return { ok: true }
+  }
+
+  const safeItems = items
+    .filter(item => item && item.url)
+    .slice(0, 8)
+    .map(item => ({
+      title: String(item.title || item.url || ''),
+      url: String(item.url || ''),
+      favicon: String(item.favicon || ''),
+    }))
+
+  if (safeItems.length === 0) {
+    hideAddressSuggestions()
+    return { ok: true }
+  }
+
+  const rowHeight = 54
+  const popupHeight = Math.min(430, safeItems.length * rowHeight + 14)
+  const popupWidth = Math.max(360, Math.min(Number(width) || 720, 900))
+
+  if (!addressSuggestWindow || addressSuggestWindow.isDestroyed()) {
+    addressSuggestWindow = new BrowserWindow({
+      width: popupWidth,
+      height: popupHeight,
+      x: Math.round(Number(x) || 0),
+      y: Math.round(Number(y) || 0),
+      parent: mainWindow,
+      frame: false,
+      show: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      focusable: false,
+      backgroundColor: '#111217',
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        sandbox: false,
+      },
+    })
+
+    addressSuggestWindow.on('closed', () => {
+      addressSuggestWindow = null
+    })
+  }
+
+  addressSuggestWindow.setBounds({
+    x: Math.round(Number(x) || 0),
+    y: Math.round(Number(y) || 0),
+    width: popupWidth,
+    height: popupHeight,
+  })
+
+  const rows = safeItems.map((item, idx) => `
+    <button class="row ${idx === Number(selectedIndex) ? 'selected' : ''}" data-url="${escapeHtml(item.url)}">
+      <div class="ico">${item.favicon ? `<img src="${escapeHtml(item.favicon)}" />` : '🌐'}</div>
+      <div class="meta">
+        <div class="title">${escapeHtml(item.title)}</div>
+        <div class="url">${escapeHtml(item.url)}</div>
+      </div>
+    </button>
+  `).join('')
+
+  const html = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  .wrap {
+    margin: 0;
+    padding: 7px;
+    width: 100vw;
+    height: 100vh;
+    background: #151720;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    box-shadow: 0 20px 70px rgba(0,0,0,.65);
+  }
+  .row {
+    width: 100%;
+    height: 54px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #f4f4f5;
+    text-align: left;
+    cursor: pointer;
+    padding: 7px 10px;
+  }
+  .row:hover,
+  .row.selected {
+    background: rgba(255,255,255,.10);
+  }
+
+  .row.selected {
+    outline: 1px solid rgba(245,166,35,.35);
+  }
+  .ico {
+    width: 24px;
+    height: 24px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex: 0 0 auto;
+    font-size: 15px;
+  }
+  .ico img {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+  }
+  .meta {
+    min-width: 0;
+  }
+  .title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f4f4f5;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+  .url {
+    margin-top: 2px;
+    font-size: 11px;
+    color: #8b949e;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    ${rows}
+  </div>
+<script>
+  const { ipcRenderer } = require('electron')
+  document.querySelectorAll('.row').forEach(row => {
+    row.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const url = row.getAttribute('data-url')
+      if (url) ipcRenderer.send('address-suggestion-selected', url)
+    })
+  })
+</script>
+</body>
+</html>`
+
+  addressSuggestWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+  addressSuggestWindow.showInactive()
+
+  return { ok: true }
+}
 
 function getIpcOrigin(ipcEvent) {
   const url =
@@ -211,15 +530,202 @@ function parseNativePaymentUrl(rawUrl) {
   return null
 }
 
-function createMainView() {
+function getTorProxyConfig() {
+  const priv = DB.getPrivacy()
+  const enabled = Number(priv?.tor_enabled) === 1
+  const host = String(priv?.tor_host || '127.0.0.1').trim()
+  const port = Number(priv?.tor_port || 9050)
+
+  if (!enabled) return { enabled: false }
+
+  if (!host || !Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    return { enabled: false, error: 'Invalid Tor/SOCKS proxy settings' }
+  }
+
+  return {
+    enabled: true,
+    host,
+    port,
+    config: {
+      proxyRules: `socks5://${host}:${port}`,
+      proxyBypassRules: [
+        '<-loopback>',
+        'localhost',
+        '127.0.0.1',
+        '::1',
+        'localhost:3000',
+        '127.0.0.1:3000',
+      ].join(';'),
+    },
+  }
+}
+
+async function applyProxyToSession(ses) {
+  const tor = getTorProxyConfig()
+
+  if (tor.error) return { ok: false, error: tor.error }
+
+  if (!tor.enabled) {
+    await ses.setProxy({ proxyRules: '' })
+    await ses.forceReloadProxyConfig()
+    return { ok: true, enabled: false }
+  }
+
+  await ses.setProxy(tor.config)
+  await ses.forceReloadProxyConfig()
+
+  return { ok: true, enabled: true, host: tor.host, port: tor.port }
+}
+
+async function applyNetworkProxy() {
+  const result = await applyProxyToSession(session.defaultSession)
+
+  for (const view of tabViews.values()) {
+    try {
+      if (!view?.webContents?.isDestroyed()) {
+        await applyProxyToSession(view.webContents.session)
+      }
+    } catch (_) {}
+  }
+
+  return result
+}
+
+function sendTabUpdated(tabId, patch = {}) {
+  if (!mainWindow || !tabId) return
+
+  const previous = lastTabUpdates.get(tabId) || {}
+  const next = { ...previous, ...patch }
+
+  const changed = Object.keys(patch).some((key) => previous[key] !== patch[key])
+  if (!changed) return
+
+  lastTabUpdates.set(tabId, next)
+  mainWindow.webContents.send('tab-updated', { tabId, ...patch })
+}
+
+
+function injectAntiFingerprint(view) {
+  if (!view || view.webContents.isDestroyed()) return
+
+  const fp = fingerprintProfile
+
+  const code = `
+    (() => {
+      const fp = ${JSON.stringify(fp)}
+
+      const spoof = (obj, prop, value) => {
+        try {
+          Object.defineProperty(obj, prop, {
+            get: () => value,
+            configurable: true
+          })
+        } catch (_) {}
+      }
+
+      spoof(Navigator.prototype, 'platform', fp.platform)
+      spoof(navigator, 'platform', fp.platform)
+
+      spoof(Navigator.prototype, 'hardwareConcurrency', fp.hardwareConcurrency)
+      spoof(navigator, 'hardwareConcurrency', fp.hardwareConcurrency)
+
+      spoof(Navigator.prototype, 'deviceMemory', fp.deviceMemory)
+      spoof(navigator, 'deviceMemory', fp.deviceMemory)
+
+      spoof(Navigator.prototype, 'language', fp.language)
+      spoof(navigator, 'language', fp.language)
+
+      spoof(Navigator.prototype, 'languages', fp.languages)
+      spoof(navigator, 'languages', fp.languages)
+
+      spoof(Navigator.prototype, 'webdriver', false)
+      spoof(navigator, 'webdriver', false)
+
+      try {
+        Date.prototype.getTimezoneOffset = function () {
+          return fp.timezoneOffset
+        }
+      } catch (_) {}
+
+      try {
+        const ro = Intl.DateTimeFormat.prototype.resolvedOptions
+        Intl.DateTimeFormat.prototype.resolvedOptions = function () {
+          const r = ro.apply(this, arguments)
+          r.timeZone = fp.timezone
+          return r
+        }
+      } catch (_) {}
+
+      try {
+        if (navigator.mediaDevices) {
+          navigator.mediaDevices.enumerateDevices = async () => []
+        }
+      } catch (_) {}
+
+      try {
+        const ge = WebGLRenderingContext.prototype.getExtension
+        WebGLRenderingContext.prototype.getExtension = function(name) {
+          if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+          return ge.apply(this, arguments)
+        }
+
+        const gp = WebGLRenderingContext.prototype.getParameter
+        WebGLRenderingContext.prototype.getParameter = function(param) {
+          if (param === 37445) return fp.webglVendor
+          if (param === 37446) return fp.webglRenderer
+          return gp.apply(this, arguments)
+        }
+      } catch (_) {}
+
+      try {
+        const ge2 = WebGL2RenderingContext.prototype.getExtension
+        WebGL2RenderingContext.prototype.getExtension = function(name) {
+          if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+          return ge2.apply(this, arguments)
+        }
+
+        const gp2 = WebGL2RenderingContext.prototype.getParameter
+        WebGL2RenderingContext.prototype.getParameter = function(param) {
+          if (param === 37445) return fp.webglVendor
+          if (param === 37446) return fp.webglRenderer
+          return gp2.apply(this, arguments)
+        }
+      } catch (_) {}
+
+      window.__zapAntiFingerprint = true
+      window.__zapFingerprintProfile = fp.name
+    })()
+  `
+
+  view.webContents.executeJavaScript(code, true).catch(() => {})
+}
+
+
+function createMainView(tabId = null, isPrivate = false) {
+  const viewTabId = tabId
+  const partition = isPrivate && tabId ? `zap-private-${tabId}` : undefined
+
+  const viewSession = partition ? session.fromPartition(partition) : session.defaultSession
+
+  setupPrivacy(viewSession)
+  setupDownloads(viewSession)
+
+  // Apply Tor/proxy policy also to isolated private sessions.
+  applyProxyToSession(viewSession).catch(() => {})
+
   const view = new BrowserView({
     webPreferences: {
       preload: path.join(__dirname, '../preload/webview.js'),
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
+      session: viewSession,
     }
   })
+
+  view.webContents.on('dom-ready', () => injectAntiFingerprint(view))
+  view.webContents.on('did-finish-load', () => injectAntiFingerprint(view))
+  view.webContents.on('did-frame-finish-load', () => injectAntiFingerprint(view))
 
   view.webContents.on('console-message', (_event, level, message) => {
     if (!ZAP_DEBUG) return
@@ -229,19 +735,19 @@ function createMainView() {
   })
 
   view.webContents.on('page-title-updated', (_, title) => {
-    if (!activeTabId) return
-    mainWindow?.webContents.send('tab-updated', {
-      tabId: activeTabId,
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+    sendTabUpdated(ownerTabId, {
       title,
       url: view.webContents.getURL(),
     })
   })
 
   view.webContents.on('did-navigate', async (_, url) => {
-    if (!activeTabId) return
-    tabUrls.set(activeTabId, url)
-    mainWindow?.webContents.send('tab-updated', {
-      tabId: activeTabId,
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+    tabUrls.set(ownerTabId, url)
+    sendTabUpdated(ownerTabId, {
       url,
       canGoBack: view.webContents.canGoBack(),
       canGoForward: view.webContents.canGoForward(),
@@ -257,18 +763,28 @@ function createMainView() {
   })
 
   view.webContents.on('did-start-loading', () => {
-    if (activeTabId && !isSwitching) {
-      mainWindow?.webContents.send('tab-updated', { tabId: activeTabId, loading: true })
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (ownerTabId && !isSwitching) {
+      sendTabUpdated(ownerTabId, { loading: true })
     }
   })
 
   view.webContents.on('did-stop-loading', () => {
-    if (!activeTabId) return
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+
     const url   = view.webContents.getURL()
     const title = view.webContents.getTitle()
-    mainWindow?.webContents.send('tab-updated', { tabId: activeTabId, loading: false, url, title })
-    if (url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
+
+    sendTabUpdated(ownerTabId, { loading: false, url, title })
+
+    const meta = tabMeta.get(ownerTabId) || {}
+    if (!meta.private && url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
       DB.addHistory(url, title)
+    }
+
+    if (navigationOwnerTabId === ownerTabId) {
+      navigationOwnerTabId = null
     }
   })
 
@@ -324,6 +840,15 @@ function createMainView() {
       mainWindow?.webContents.send('popup-blocked', { url })
       return { action: 'deny' }
     }
+  })
+
+  // Native browser context menu.
+  // This avoids React overlays above BrowserView and gives Zap Browser
+  // desktop-grade right-click behavior.
+  setupWebViewContextMenu({
+    view,
+    mainWindow,
+    getActiveTabId: () => activeTabId,
   })
 
   // Suppress the browser's unload dialog so closing a tab is never blocked
@@ -758,6 +1283,45 @@ function setupPrivacy(ses) {
       }
     } catch (_) {}
 
+    const earlyBlockPatterns = [
+      'quantcast',
+      'qc-cmp',
+      'didomi',
+      'onetrust',
+      'cookiebot',
+      'iubenda',
+      'privacy-mgmt',
+      'privacycenter',
+      'cmp.',
+      '/cmp/',
+      'consent',
+      'consensu',
+      'fundingchoices',
+      'sourcepoint',
+      'sp-prod',
+      'trustarc',
+      'cookielaw',
+      'cookie-law',
+      'cookieconsent',
+      'adsystem',
+      'doubleclick',
+      'googlesyndication',
+      'adservice.google',
+      'amazon-adsystem',
+      'criteo',
+      'rubiconproject',
+      'pubmatic',
+      'openx',
+      'taboola',
+      'outbrain'
+    ]
+
+    if (earlyBlockPatterns.some(p => details.url.toLowerCase().includes(p))) {
+      bl.incrementBlocked()
+      mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
+      return cb({ cancel: true })
+    }
+
     const safePatterns = [
       'subscriptions.js',
       'chartbeat_mab',
@@ -805,37 +1369,56 @@ function setupDownloads(ses) {
 
     activeDownloads.set(id, item)
 
-    mainWindow?.webContents.send('download-started', {
+    const startData = {
       id,
       fileName,
       totalBytes,
       receivedBytes: 0,
       state: 'progressing',
       savePath: item.getSavePath(),
-    })
+    }
+
+    DB.addDownload(startData)
+
+    mainWindow?.webContents.send('download-started', startData)
 
     item.on('updated', (_event, state) => {
-      mainWindow?.webContents.send('download-updated', {
+      const updateData = {
         id,
         fileName,
         totalBytes,
         receivedBytes: item.getReceivedBytes(),
         state,
         savePath: item.getSavePath(),
-      })
+      }
+
+      DB.addDownload(updateData)
+
+      mainWindow?.webContents.send('download-updated', updateData)
     })
 
     item.once('done', (_event, state) => {
       activeDownloads.delete(id)
 
-      mainWindow?.webContents.send('download-done', {
+      const doneData = {
         id,
         fileName,
         totalBytes,
         receivedBytes: item.getReceivedBytes(),
         state,
         savePath: item.getSavePath(),
-      })
+      }
+
+      DB.addDownload(doneData)
+
+      try {
+        new Notification({
+          title: 'Download completed',
+          body: fileName,
+        }).show()
+      } catch (_) {}
+
+      mainWindow?.webContents.send('download-done', doneData)
     })
   })
 }
@@ -855,10 +1438,11 @@ function createWindow() {
   })
 
   session.defaultSession.setUserAgent(currentUA)
-  activeView = createMainView()
+  activeView = null
 
   setupPrivacy(session.defaultSession)
   setupDownloads(session.defaultSession)
+  applyNetworkProxy().catch(err => console.error('[Proxy] apply failed', err))
 
   bl.init((size) => {
     mainWindow?.webContents.send('blocklist-ready', { size })
@@ -896,6 +1480,21 @@ function createWindow() {
   })
 }
 
+
+// ── IPC: portable mode ────────────────────────────────────────────────────────
+ipcMain.handle('portable-status', () => ({
+  portable: portable.isPortableMode(),
+  configured: portable.hasPortableConfig(),
+}))
+
+ipcMain.handle('portable-setup-passphrase', (_, { passphrase }) => {
+  return portable.setupPassphrase(passphrase)
+})
+
+ipcMain.handle('portable-unlock', (_, { passphrase }) => {
+  return portable.unlock(passphrase)
+})
+
 // ── IPC: window controls ──────────────────────────────────────────────────────
 ipcMain.on('win-minimize', () => mainWindow?.minimize())
 ipcMain.on('win-maximize', () =>
@@ -909,58 +1508,124 @@ ipcMain.handle('open-in-new-tab', (_, { url }) => {
 })
 
 // ── IPC: tabs ─────────────────────────────────────────────────────────────────
-ipcMain.handle('tab-create', (_, { tabId }) => {
+ipcMain.handle('tab-create', (_, { tabId, private: isPrivate = false }) => {
   tabUrls.set(tabId, '')
+  tabMeta.set(tabId, { private: !!isPrivate })
   activeTabId = tabId
-  showView(mainWindow, activeView)
-  activeView.webContents.loadURL('about:blank').catch(() => {})
+
+  if (!tabViews.has(tabId)) {
+    tabViews.set(tabId, createMainView(tabId, !!isPrivate))
+  }
+
+  if (activeView) hideView(mainWindow, activeView)
+  activeView = tabViews.get(tabId)
+
+  // Empty tabs are rendered by the React shell, not BrowserView.
+  hideView(mainWindow, activeView)
+
   return { ok: true }
 })
 
 ipcMain.handle('tab-switch', (_, { tabId }) => {
   activeTabId = tabId
   const url = tabUrls.get(tabId) || ''
-  if (url && url !== 'zap://newtab') {
-    showView(mainWindow, activeView)
-    const current = activeView.webContents.getURL()
-    if (current !== url) {
-      isSwitching = true
-      activeView.webContents.loadURL(url)
-        .catch(() => {})
-        .finally(() => { isSwitching = false })
-    }
-  } else {
-    hideView(mainWindow, activeView)
+
+  if (!url || url === 'zap://newtab') {
+    if (activeView) hideView(mainWindow, activeView)
+    activeView = tabViews.get(tabId) || null
+    return { ok: true }
   }
+
+  let view = tabViews.get(tabId)
+  if (!view) {
+    const meta = tabMeta.get(tabId) || {}
+    view = createMainView(tabId, !!meta.private)
+    tabViews.set(tabId, view)
+  }
+
+  if (activeView && activeView !== view) hideView(mainWindow, activeView)
+  activeView = view
+  showView(mainWindow, activeView)
+
+  const current = activeView.webContents.getURL()
+  if (!current || current === 'about:blank') {
+    isSwitching = true
+    navigationOwnerTabId = tabId
+    activeView.webContents.loadURL(url)
+      .catch(() => {})
+      .finally(() => { isSwitching = false })
+  }
+
   return { ok: true }
 })
 
 ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   if (!tabId || typeof url !== 'string') return { ok: false, error: 'Invalid arguments' }
+
   let u = url.trim()
   if (!u.startsWith('http://') && !u.startsWith('https://')) {
     u = u.includes('.') && !u.includes(' ')
       ? 'https://' + u
       : 'https://duckduckgo.com/?q=' + encodeURIComponent(u)
   }
+
+  let view = tabViews.get(tabId)
+  if (!view) {
+    const meta = tabMeta.get(tabId) || {}
+    view = createMainView(tabId, !!meta.private)
+    tabViews.set(tabId, view)
+  }
+
   activeTabId = tabId
+  navigationOwnerTabId = tabId
   tabUrls.set(tabId, u)
+
+  if (activeView && activeView !== view) hideView(mainWindow, activeView)
+  activeView = view
   showView(mainWindow, activeView)
+
   await new Promise(r => setTimeout(r, 50))
   activeView.webContents.loadURL(u).catch(() => {})
+
   return { ok: true, url: u }
 })
 
 ipcMain.handle('tab-close', (_, { tabId }) => {
   tabUrls.delete(tabId)
-  if (activeTabId === tabId) { hideView(mainWindow, activeView); activeTabId = null }
+  const meta = tabMeta.get(tabId) || {}
+  tabMeta.delete(tabId)
+
+  const view = tabViews.get(tabId)
+  if (view) {
+    try { hideView(mainWindow, view) } catch (_) {}
+    try {
+      if (meta.private) {
+        view.webContents.session.clearStorageData().catch(() => {})
+        view.webContents.session.clearCache().catch(() => {})
+      }
+    } catch (_) {}
+
+    try { view.webContents.destroy() } catch (_) {}
+    tabViews.delete(tabId)
+  }
+
+  if (activeTabId === tabId) {
+    activeView = null
+    activeTabId = null
+  }
+
   return { ok: true }
 })
 
 ipcMain.handle('tab-home', (_, { tabId }) => {
   activeTabId = tabId
   tabUrls.set(tabId, '')
-  hideView(mainWindow, activeView)
+
+  const view = tabViews.get(tabId)
+  if (view) hideView(mainWindow, view)
+
+  if (activeView === view) activeView = null
+
   return { ok: true }
 })
 
@@ -999,6 +1664,122 @@ ipcMain.handle('download-show-folder', (_, { path: filePath }) => {
   return { ok: true }
 })
 
+ipcMain.handle('address-suggestions-show', (_, args) => showAddressSuggestions(args || {}))
+ipcMain.handle('address-suggestions-hide', () => {
+  hideAddressSuggestions()
+  return { ok: true }
+})
+
+ipcMain.on('address-suggestion-selected', (_event, url) => {
+  hideAddressSuggestions()
+
+  if (!url || typeof url !== 'string') return
+
+  mainWindow?.webContents.send('address-suggestion-picked', { url })
+})
+
+ipcMain.handle('show-bookmark-context-menu', async (_, bookmark) => {
+  const action = await showBookmarkContextMenu({
+    mainWindow,
+    bookmark,
+  })
+
+  return { ok: true, action }
+})
+
+ipcMain.handle('show-bookmark-folder-popup', (_, args) => {
+  return showBookmarkFolderPopup({
+    mainWindow,
+    folder: args?.folder,
+    items: args?.items || [],
+    x: args?.x || 0,
+    y: args?.y || 0,
+  })
+})
+
+ipcMain.handle('hide-bookmark-folder-popup', () => {
+  hideBookmarkFolderPopup()
+  return { ok: true }
+})
+
+ipcMain.on('bookmark-folder-popup-picked', (_event, item) => {
+  hideBookmarkFolderPopup()
+  mainWindow?.webContents.send('bookmark-folder-picked', item)
+})
+
+ipcMain.on('bookmark-folder-popup-open-new-tab', (_event, url) => {
+  hideBookmarkFolderPopup()
+
+  if (!url || typeof url !== 'string') return
+
+  mainWindow?.webContents.send('bookmark-open-new-tab', { url })
+})
+
+ipcMain.on('bookmark-folder-popup-context-menu', (_event, bookmark) => {
+  showBookmarkContextMenu({
+    mainWindow,
+    bookmark,
+  })
+})
+
+ipcMain.handle('show-edit-context-menu', () => {
+  const { Menu } = require('electron')
+
+  const menu = Menu.buildFromTemplate([
+    { role: 'cut', label: 'Cut' },
+    { role: 'copy', label: 'Copy' },
+    { role: 'paste', label: 'Paste' },
+    { type: 'separator' },
+    { role: 'selectAll', label: 'Select All' },
+  ])
+
+  menu.popup({ window: mainWindow })
+  return { ok: true }
+})
+
+ipcMain.handle('show-ua-menu', () => {
+  const { Menu } = require('electron')
+
+  const priv = DB.getPrivacy()
+  const current = priv?.ua_mode || 'rotate'
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'Auto-rotate',
+      type: 'radio',
+      checked: current === 'rotate',
+      click: () => {
+        DB.setPrivacy('ua_mode', 'rotate')
+        currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
+        session.defaultSession.setUserAgent(currentUA)
+        mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+      },
+    },
+    {
+      label: 'Default browser',
+      type: 'radio',
+      checked: current === 'default',
+      click: () => {
+        DB.setPrivacy('ua_mode', 'default')
+        session.defaultSession.setUserAgent('')
+        mainWindow?.webContents.send('ua-mode-updated', { mode: 'default', ua: '' })
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Rotate now',
+      click: () => {
+        currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
+        session.defaultSession.setUserAgent(currentUA)
+        mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+      },
+    },
+  ])
+
+  menu.popup({ window: mainWindow })
+  return { ok: true }
+})
+
 // ── IPC: privacy ──────────────────────────────────────────────────────────────
 ipcMain.handle('get-privacy', () => ({
   ...DB.getPrivacy(),
@@ -1030,6 +1811,33 @@ ipcMain.handle('set-doh', (_, { enabled, provider }) => {
   DB.setPrivacy('doh_enabled', enabled ? 1 : 0)
   return { ok: true }
 })
+ipcMain.handle('set-tor-proxy', async (_, { enabled, host, port } = {}) => {
+  DB.setPrivacy('tor_enabled', enabled ? 1 : 0)
+
+  if (host != null) {
+    V.assert(typeof host === 'string' && host.length > 0 && host.length <= 255, 'Invalid proxy host')
+    DB.setPrivacy('tor_host', host.trim())
+  }
+
+  if (port != null) {
+    const safePort = Number(port)
+    V.assert(Number.isSafeInteger(safePort) && safePort > 0 && safePort <= 65535, 'Invalid proxy port')
+    DB.setPrivacy('tor_port', safePort)
+  }
+
+  return applyNetworkProxy()
+})
+ipcMain.handle('get-download-history', () => {
+  const items = DB.getDownloads()
+  console.log('[Downloads] history request', items)
+  return items
+})
+
+ipcMain.handle('clear-download-history', () => {
+  DB.clearDownloads()
+  return { ok: true }
+})
+
 ipcMain.handle('get-blocklist-info', () => ({
   size:  bl.getListSize(),
   ready: bl.isReady(),
@@ -1085,6 +1893,15 @@ ipcMain.handle('nostr-import-nsec',    (_, args) => {
 })
 ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1'))
 ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
+ipcMain.handle('nostr-list-profiles',  () => nostr.listProfiles(DB))
+ipcMain.handle('nostr-set-active-profile', (_, { id }) => {
+  V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
+  return nostr.setActiveProfile(DB, Number(id))
+})
+ipcMain.handle('nostr-remove-profile-by-id', (_, { id }) => {
+  V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
+  return nostr.removeProfileById(DB, Number(id))
+})
 ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
 ipcMain.handle('nostr-list-permissions', () => DB.listNostrPermissions())
 ipcMain.handle('nostr-clear-permissions', () => DB.clearNostrPermissions())
@@ -1268,6 +2085,56 @@ ipcMain.handle('move-favorite', (_, { id, parent_id }) => {
   return DB.moveFavorite(Number(id), parent_id === 'root' ? null : parent_id)
 })
 
+ipcMain.handle('export-favorites-html', () => {
+  const favorites = DB.getFavorites()
+  const byParent = {}
+
+  for (const item of favorites) {
+    const key = item.parent_id == null ? 'root' : String(item.parent_id)
+    if (!byParent[key]) byParent[key] = []
+    byParent[key].push(item)
+  }
+
+  for (const key of Object.keys(byParent)) {
+    byParent[key].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+  }
+
+  const esc = (s = '') => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+
+  const render = (parentId = null, depth = 1) => {
+    const key = parentId == null ? 'root' : String(parentId)
+    const items = byParent[key] || []
+    const pad = '    '.repeat(depth)
+    let out = `${pad}<DL><p>\n`
+
+    for (const item of items) {
+      if (Number(item.is_folder) === 1) {
+        out += `${pad}    <DT><H3>${esc(item.title || 'Folder')}</H3>\n`
+        out += render(item.id, depth + 1)
+      } else if (item.url) {
+        out += `${pad}    <DT><A HREF="${esc(item.url)}">${esc(item.title || item.url)}</A>\n`
+      }
+    }
+
+    out += `${pad}</DL><p>\n`
+    return out
+  }
+
+  const html = [
+    '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
+    '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+    '<TITLE>Bookmarks</TITLE>',
+    '<H1>Bookmarks</H1>',
+    render(null, 0),
+  ].join('\n')
+
+  return { ok: true, html }
+})
+
 ipcMain.handle('import-favorites-html', (_, { html }) => {
   V.assert(typeof html === 'string' && html.length <= 10_000_000, 'Invalid bookmarks HTML')
 
@@ -1426,6 +2293,8 @@ ipcMain.handle('reset-browser', () => {
   try { require('fs').unlinkSync(dbPath) } catch (_) {}
   return { ok: true }
 })
+
+portable.applyPortableUserDataPath()
 
 app.whenReady().then(createWindow)
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

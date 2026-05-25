@@ -2,6 +2,10 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('zap', {
+  portableStatus: () => ipcRenderer.invoke('portable-status'),
+  portableSetupPassphrase: (a) => ipcRenderer.invoke('portable-setup-passphrase', a),
+  portableUnlock: (a) => ipcRenderer.invoke('portable-unlock', a),
+
   // Window controls
   minimize: () => ipcRenderer.send('win-minimize'),
   maximize: () => ipcRenderer.send('win-maximize'),
@@ -29,6 +33,11 @@ contextBridge.exposeInMainWorld('zap', {
   getBlockedCount:  () => ipcRenderer.invoke('get-blocked-count'),
   getUAPool:        () => ipcRenderer.invoke('get-ua-pool'),
   setDoh:           (a) => ipcRenderer.invoke('set-doh', a),
+  setTorProxy:      (a) => ipcRenderer.invoke('set-tor-proxy', a),
+  showEditContextMenu: () => ipcRenderer.invoke('show-edit-context-menu'),
+  showUAMenu: () => ipcRenderer.invoke('show-ua-menu'),
+  getDownloadHistory: () => ipcRenderer.invoke('get-download-history'),
+  clearDownloadHistory: () => ipcRenderer.invoke('clear-download-history'),
   getBlocklistInfo: () => ipcRenderer.invoke('get-blocklist-info'),
 
   // Value4Value
@@ -47,6 +56,9 @@ contextBridge.exposeInMainWorld('zap', {
   nostrImportNsec:    (a) => ipcRenderer.invoke('nostr-import-nsec', a),
   nostrSkip:          () => ipcRenderer.invoke('nostr-skip'),
   nostrGetProfile:    () => ipcRenderer.invoke('nostr-get-profile'),
+  nostrListProfiles:  () => ipcRenderer.invoke('nostr-list-profiles'),
+  nostrSetActiveProfile: (a) => ipcRenderer.invoke('nostr-set-active-profile', a),
+  nostrRemoveProfileById: (a) => ipcRenderer.invoke('nostr-remove-profile-by-id', a),
   nostrRemoveProfile: () => ipcRenderer.invoke('nostr-remove-profile'),
   nostrListPermissions: () => ipcRenderer.invoke('nostr-list-permissions'),
   nostrClearPermissions: () => ipcRenderer.invoke('nostr-clear-permissions'),
@@ -77,6 +89,7 @@ contextBridge.exposeInMainWorld('zap', {
   renameFavorite:      (a) => ipcRenderer.invoke('rename-favorite', a),
   moveFavorite:        (a) => ipcRenderer.invoke('move-favorite', a),
   importFavoritesHtml: (a) => ipcRenderer.invoke('import-favorites-html', a),
+  exportFavoritesHtml: () => ipcRenderer.invoke('export-favorites-html'),
 
   // Cashu
   cashuGetBalance: () => ipcRenderer.invoke('cashu-get-balance'),
@@ -94,6 +107,13 @@ contextBridge.exposeInMainWorld('zap', {
   cancelDownload: (a) => ipcRenderer.invoke('download-cancel', a),
   openDownload: (a) => ipcRenderer.invoke('download-open', a),
   showDownloadInFolder: (a) => ipcRenderer.invoke('download-show-folder', a),
+  showAddressSuggestions: (a) => ipcRenderer.invoke('address-suggestions-show', a),
+  hideAddressSuggestions: () => ipcRenderer.invoke('address-suggestions-hide'),
+  showBookmarkContextMenu: (a) => ipcRenderer.invoke('show-bookmark-context-menu', a),
+  showBookmarkFolderPopup: (a) => ipcRenderer.invoke('show-bookmark-folder-popup', a),
+  hideBookmarkFolderPopup: () => ipcRenderer.invoke('hide-bookmark-folder-popup'),
+  showBookmarkFolderPopup: (a) => ipcRenderer.invoke('show-bookmark-folder-popup', a),
+  hideBookmarkFolderPopup: () => ipcRenderer.invoke('hide-bookmark-folder-popup'),
 
   // Data management
   resetBrowser: () => ipcRenderer.invoke('reset-browser'),
@@ -110,8 +130,22 @@ contextBridge.exposeInMainWorld('zap', {
       'tab-switched', 'page-features', 'v4v-detected', 'blocklist-ready',
       'open-new-tab', 'tab-ready', 'popup-blocked',
       'download-started', 'download-updated', 'download-done',
+      'address-suggestion-picked',
+      'bookmark-open-new-tab',
+      'bookmark-rename',
+      'bookmark-delete',
+      'bookmark-new-folder',
+      'bookmark-new-folder-request',
+      'bookmark-create-folder-request',
+      'ua-mode-updated',
+      'bookmark-folder-picked',
     ]
-    if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => cb(data))
+    if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => {
+      if (channel === 'bookmark-create-folder-request') {
+        console.log('[DEBUG][preload] event received:', channel, data)
+      }
+      cb(data)
+    })
   },
   off: (channel, cb) => ipcRenderer.removeListener(channel, cb),
 })

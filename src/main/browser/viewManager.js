@@ -1,6 +1,6 @@
 'use strict'
 
-const SHELL_H = 142
+const SHELL_H = 174
 
 function showView(mainWindow, activeView) {
   if (!mainWindow || !activeView) return
@@ -37,7 +37,7 @@ function resizeView(mainWindow, activeView, args = {}) {
 
   const { width, height } = mainWindow.getBounds()
 
-  const suggestionsOffset = args?.suggestionsOpen ? 320 : 0
+  const suggestionsOffset = 0
 
   activeView.setBounds({
     x: 0,

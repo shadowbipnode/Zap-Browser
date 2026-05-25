@@ -25,11 +25,27 @@ function formatBytes(n:number) {
 }
 
 export default function DownloadsPanel({ downloads, onClose }: Props) {
+
+  console.log('[DownloadsPanel props]', downloads)
+
   return (
     <>
       <div className="panel-hd">
         <span className="panel-hd-title">⬇ Downloads</span>
-        <button className="panel-hd-close" onClick={onClose}>×</button>
+
+        <div style={{display:'flex',gap:8}}>
+          <button
+            className="act-btn"
+            onClick={async () => {
+              await window.zap?.clearDownloadHistory?.()
+              window.location.reload()
+            }}
+          >
+            Clear
+          </button>
+
+          <button className="panel-hd-close" onClick={onClose}>×</button>
+        </div>
       </div>
 
       <div className="panel-body">
@@ -38,8 +54,11 @@ export default function DownloadsPanel({ downloads, onClose }: Props) {
             No downloads yet.
           </div>
         ) : downloads.map((d:any) => {
-          const pct = d.totalBytes > 0
-            ? Math.min(100, Math.round((d.receivedBytes / d.totalBytes) * 100))
+          const total = d.totalBytes || d.total || 0
+          const received = d.receivedBytes || d.received || 0
+
+          const pct = total > 0
+            ? Math.min(100, Math.round((received / total) * 100))
             : 0
 
           const completed = d.state === 'completed'
@@ -66,15 +85,15 @@ export default function DownloadsPanel({ downloads, onClose }: Props) {
                 whiteSpace:'nowrap',
                 marginBottom:5,
               }}>
-                {d.fileName || 'download'}
+                {d.fileName || d.filename || 'download'}
               </div>
 
               <div style={{fontSize:11,color:'var(--t2)',marginBottom:8}}>
                 {completed
-                  ? `Completed · ${formatBytes(d.receivedBytes)}`
+                  ? `Completed · ${formatBytes(received)}`
                   : cancelled
                     ? 'Cancelled'
-                    : `${formatBytes(d.receivedBytes)} / ${formatBytes(d.totalBytes)} · ${pct}%`}
+                    : `${formatBytes(received)} / ${formatBytes(total)} · ${pct}%`}
               </div>
 
               <div style={{
@@ -92,7 +111,7 @@ export default function DownloadsPanel({ downloads, onClose }: Props) {
                 }} />
               </div>
 
-              {d.savePath && (
+              {(d.savePath || d.path) && (
                 <div style={{
                   fontSize:10,
                   color:'var(--t2)',
@@ -102,17 +121,17 @@ export default function DownloadsPanel({ downloads, onClose }: Props) {
                   whiteSpace:'nowrap',
                   marginBottom:8,
                 }}>
-                  {d.savePath}
+                  {d.savePath || d.path}
                 </div>
               )}
 
               <div style={{display:'flex',gap:8}}>
-                {completed && d.savePath && (
+                {completed && (d.savePath || d.path) && (
                   <>
-                    <button className="act-btn" onClick={() => window.zap?.openDownload?.({ path: d.savePath })}>
+                    <button className="act-btn" onClick={() => window.zap?.openDownload?.({ path: d.savePath || d.path })}>
                       Open
                     </button>
-                    <button className="act-btn" onClick={() => window.zap?.showDownloadInFolder?.({ path: d.savePath })}>
+                    <button className="act-btn" onClick={() => window.zap?.showDownloadInFolder?.({ path: d.savePath || d.path })}>
                       Show folder
                     </button>
                   </>

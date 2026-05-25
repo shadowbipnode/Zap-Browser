@@ -1,6 +1,6 @@
 {
   "name": "zap-browser",
-  "version": "0.4.0-beta",
+  "version": "0.5.0-beta",
   "description": "Privacy-first Bitcoin browser with Lightning, Liquid, Cashu and Nostr",
   "main": "src/main/index.js",
   "scripts": {
@@ -12,7 +12,7 @@
   },
   "build": {
     "appId": "com.zapbrowser.app",
-    "productName": "zap-browser",
+    "productName": "Zap Browser",
     "linux": {
       "target": [
         "AppImage",
@@ -21,7 +21,15 @@
       ],
       "category": "Network",
       "icon": "assets/icons",
-      "maintainer": "Zap Browser Contributors <dev@zapbrowser.org>"
+      "maintainer": "Zap Browser Contributors <dev@zapbrowser.org>",
+      "desktop": {
+        "Name": "Zap Browser",
+        "StartupWMClass": "Zap Browser",
+        "Comment": "Privacy-first sovereign browser with Lightning, Cashu and Nostr",
+        "Categories": "Network;WebBrowser;"
+      },
+      "synopsis": "Privacy-first sovereign browser",
+      "description": "Privacy-focused sovereign browser with native Lightning, Cashu, Nostr and Tor workflows."
     },
     "mac": {
       "target": "dmg"
@@ -41,7 +49,11 @@
     ],
     "icon": "assets/icons/icon.png",
     "executableName": "zap-browser",
-    "artifactName": "${productName}-${version}.${ext}"
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "buildVersion": "0.5.0-beta-1",
+    "directories": {
+      "buildResources": "assets"
+    }
   },
   "dependencies": {
     "@cashu/cashu-ts": "^2.5.3",

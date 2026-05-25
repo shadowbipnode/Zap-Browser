@@ -18,13 +18,12 @@ interface Props {
   currentTitle:string
 }
 
-export default function FavoritesPanel({ onClose, onNavigate, currentUrl, currentTitle }: Props) {
+export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, currentUrl, currentTitle }: Props) {
   const [favs, setFavs] = useState<Fav[]>([])
   const [msg, setMsg] = useState('')
   const [search, setSearch] = useState('')
   const [selectedFolder, setSelectedFolder] = useState<string>('root')
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({})
-  const [activeActions, setActiveActions] = useState<number|null>(null)
   const [movingItem, setMovingItem] = useState<Fav|null>(null)
   const [moveTarget, setMoveTarget] = useState<string>('root')
   const [renamingItem, setRenamingItem] = useState<Fav|null>(null)
@@ -34,6 +33,12 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
   const [manualUrl, setManualUrl] = useState('')
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    const reload = () => load()
+    window.addEventListener('favorites-updated', reload)
+    return () => window.removeEventListener('favorites-updated', reload)
+  }, [])
 
   const load = () => {
     ;(window as any).zap?.getFavorites().then((items: Fav[]) => setFavs(items || []))
@@ -145,6 +150,26 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
     input.click()
   }
 
+  const exportHTML = async () => {
+    const res = await (window as any).zap?.exportFavoritesHtml?.()
+    if (!res?.html) return
+
+    const blob = new Blob([res.html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'zap-browser-bookmarks.html'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+
+    URL.revokeObjectURL(url)
+
+    setMsg('Bookmarks exported')
+    setTimeout(() => setMsg(''), 3000)
+  }
+
   const remove = async (f: Fav) => {
     const isFolder = Number(f.is_folder) === 1
     const ok = window.confirm(
@@ -200,7 +225,7 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
   const openContext = (e:any, f: Fav) => {
     e.preventDefault()
     e.stopPropagation()
-    setActiveActions(prev => prev === f.id ? null : f.id)
+    ;(window as any).zap?.showBookmarkContextMenu?.(f)
   }
 
   const visibleMatches = (f: Fav) => {
@@ -224,6 +249,16 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
           key={f.id}
           className="fav-item"
           onContextMenu={(e) => openContext(e, f)}
+          onMouseDownCapture={(e) => {
+            if (!isFolder && e.button === 1) {
+              e.preventDefault()
+              e.stopPropagation()
+
+              if (onOpenNewTab) {
+                onOpenNewTab(f.url)
+              }
+            }
+          }}
           onClick={() => {
             if (isFolder) {
               setOpenFolders(prev => ({ ...prev, [String(f.id)]: !prev[String(f.id)] }))
@@ -231,6 +266,7 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
               openBookmark(f)
             }
           }}
+
           style={{
             paddingLeft: 14 + depth * 14,
             cursor:'pointer',
@@ -258,51 +294,6 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
             ⋮
           </button>
         </div>,
-
-        ...(activeActions === f.id ? [
-          <div
-            key={`actions-${f.id}`}
-            style={{
-              display:'flex',
-              gap:6,
-              paddingLeft: 14 + depth * 14,
-              paddingTop:4,
-              paddingBottom:8,
-            }}
-          >
-            {!isFolder && (
-              <button className="act-btn" onClick={(e) => { e.stopPropagation(); openBookmark(f) }}>
-                Open
-              </button>
-            )}
-
-            <button className="act-btn" onClick={(e) => {
-              e.stopPropagation()
-              setRenamingItem(f)
-              setRenameValue(f.title || '')
-              setActiveActions(null)
-            }}>
-              Rename
-            </button>
-
-            <button className="act-btn" onClick={(e) => {
-              e.stopPropagation()
-              setMovingItem(f)
-              setMoveTarget(f.parent_id ? String(f.parent_id) : 'root')
-              setActiveActions(null)
-            }}>
-              Move
-            </button>
-
-            <button className="act-btn" style={{color:'var(--red)'}} onClick={(e) => {
-              e.stopPropagation()
-              remove(f)
-              setActiveActions(null)
-            }}>
-              Delete
-            </button>
-          </div>
-        ] : []),
 
         ...(isFolder && opened ? renderItems(f.id, depth + 1) : []),
       ]
@@ -366,6 +357,7 @@ export default function FavoritesPanel({ onClose, onNavigate, currentUrl, curren
             style={{flex:1,padding:'8px 10px',borderRadius:'var(--r-md)',background:'var(--bg-2)',color:'var(--t0)',border:'1px solid var(--b1)',fontSize:12}}
           />
           <button className="act-btn" onClick={importHTML}>Import</button>
+          <button className="act-btn" onClick={exportHTML}>Export</button>
         </div>
 
         <div className="fav-list">
