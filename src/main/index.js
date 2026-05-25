@@ -1283,6 +1283,45 @@ function setupPrivacy(ses) {
       }
     } catch (_) {}
 
+    const earlyBlockPatterns = [
+      'quantcast',
+      'qc-cmp',
+      'didomi',
+      'onetrust',
+      'cookiebot',
+      'iubenda',
+      'privacy-mgmt',
+      'privacycenter',
+      'cmp.',
+      '/cmp/',
+      'consent',
+      'consensu',
+      'fundingchoices',
+      'sourcepoint',
+      'sp-prod',
+      'trustarc',
+      'cookielaw',
+      'cookie-law',
+      'cookieconsent',
+      'adsystem',
+      'doubleclick',
+      'googlesyndication',
+      'adservice.google',
+      'amazon-adsystem',
+      'criteo',
+      'rubiconproject',
+      'pubmatic',
+      'openx',
+      'taboola',
+      'outbrain'
+    ]
+
+    if (earlyBlockPatterns.some(p => details.url.toLowerCase().includes(p))) {
+      bl.incrementBlocked()
+      mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
+      return cb({ cancel: true })
+    }
+
     const safePatterns = [
       'subscriptions.js',
       'chartbeat_mab',
