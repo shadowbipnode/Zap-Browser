@@ -63,6 +63,12 @@ export default function BrowserPage() {
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
   const isNew = !activeTab?.url || activeTab.url === 'zap://newtab' || activeTab.url === '' || activeTab.url === ''
 
+  const activeIdRef = useRef(activeId)
+
+  useEffect(() => {
+    activeIdRef.current = activeId
+  }, [activeId])
+
   // Load privacy settings
   useEffect(() => {
     window.zap?.getDownloadHistory?.().then((items:any[]) => {
@@ -143,7 +149,7 @@ export default function BrowserPage() {
         canGoBack: data.canGoBack,
         canGoForward: data.canGoForward,
       })
-      if (data.tabId === activeId && data.url) setAddrVal(data.url)
+      if (data.tabId === activeIdRef.current && data.url) setAddrVal(data.url)
     })
     window.zap?.on('blocked-count', (n: number) => setBlocked(n))
     window.zap?.on('ua-mode-updated', async () => {
@@ -458,11 +464,13 @@ export default function BrowserPage() {
 
   // Navigate
   const handleNavigate = useCallback((url: string) => {
-    if (!activeId) return
-    window.zap?.tabNavigate({ tabId: activeId, url }).then((res: any) => {
-      if (res?.url) updateTab(activeId, { url: res.url, loading: true })
+    const tabId = activeIdRef.current
+    if (!tabId) return
+
+    window.zap?.tabNavigate({ tabId, url }).then((res: any) => {
+      if (res?.url) updateTab(tabId, { url: res.url, loading: true })
     })
-  }, [activeId, updateTab])
+  }, [updateTab])
 
   const handleAddrInput = async (val: string) => {
     setAddrVal(val)

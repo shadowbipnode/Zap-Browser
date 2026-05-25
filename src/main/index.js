@@ -40,8 +40,10 @@ const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
 let mainWindow  = null
 let activeView  = null
+const tabViews  = new Map()
 const tabUrls   = new Map()
 let activeTabId = null
+let navigationOwnerTabId = null
 let isSwitching = false
 const activeDownloads = new Map()
 const lastTabUpdates = new Map()
@@ -465,7 +467,8 @@ function sendTabUpdated(tabId, patch = {}) {
   mainWindow.webContents.send('tab-updated', { tabId, ...patch })
 }
 
-function createMainView() {
+function createMainView(tabId = null) {
+  const viewTabId = tabId
   const view = new BrowserView({
     webPreferences: {
       preload: path.join(__dirname, '../preload/webview.js'),
@@ -483,17 +486,19 @@ function createMainView() {
   })
 
   view.webContents.on('page-title-updated', (_, title) => {
-    if (!activeTabId) return
-    sendTabUpdated(activeTabId, {
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+    sendTabUpdated(ownerTabId, {
       title,
       url: view.webContents.getURL(),
     })
   })
 
   view.webContents.on('did-navigate', async (_, url) => {
-    if (!activeTabId) return
-    tabUrls.set(activeTabId, url)
-    sendTabUpdated(activeTabId, {
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+    tabUrls.set(ownerTabId, url)
+    sendTabUpdated(ownerTabId, {
       url,
       canGoBack: view.webContents.canGoBack(),
       canGoForward: view.webContents.canGoForward(),
@@ -509,18 +514,27 @@ function createMainView() {
   })
 
   view.webContents.on('did-start-loading', () => {
-    if (activeTabId && !isSwitching) {
-      sendTabUpdated(activeTabId, { loading: true })
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (ownerTabId && !isSwitching) {
+      sendTabUpdated(ownerTabId, { loading: true })
     }
   })
 
   view.webContents.on('did-stop-loading', () => {
-    if (!activeTabId) return
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+
     const url   = view.webContents.getURL()
     const title = view.webContents.getTitle()
-    sendTabUpdated(activeTabId, { loading: false, url, title })
+
+    sendTabUpdated(ownerTabId, { loading: false, url, title })
+
     if (url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
       DB.addHistory(url, title)
+    }
+
+    if (navigationOwnerTabId === ownerTabId) {
+      navigationOwnerTabId = null
     }
   })
 
@@ -1135,7 +1149,7 @@ function createWindow() {
   })
 
   session.defaultSession.setUserAgent(currentUA)
-  activeView = createMainView()
+  activeView = null
 
   setupPrivacy(session.defaultSession)
   setupDownloads(session.defaultSession)
@@ -1193,55 +1207,109 @@ ipcMain.handle('open-in-new-tab', (_, { url }) => {
 ipcMain.handle('tab-create', (_, { tabId }) => {
   tabUrls.set(tabId, '')
   activeTabId = tabId
-  showView(mainWindow, activeView)
-  activeView.webContents.loadURL('about:blank').catch(() => {})
+
+  if (!tabViews.has(tabId)) {
+    tabViews.set(tabId, createMainView(tabId))
+  }
+
+  if (activeView) hideView(mainWindow, activeView)
+  activeView = tabViews.get(tabId)
+
+  // Empty tabs are rendered by the React shell, not BrowserView.
+  hideView(mainWindow, activeView)
+
   return { ok: true }
 })
 
 ipcMain.handle('tab-switch', (_, { tabId }) => {
   activeTabId = tabId
   const url = tabUrls.get(tabId) || ''
-  if (url && url !== 'zap://newtab') {
-    showView(mainWindow, activeView)
-    const current = activeView.webContents.getURL()
-    if (current !== url) {
-      isSwitching = true
-      activeView.webContents.loadURL(url)
-        .catch(() => {})
-        .finally(() => { isSwitching = false })
-    }
-  } else {
-    hideView(mainWindow, activeView)
+
+  if (!url || url === 'zap://newtab') {
+    if (activeView) hideView(mainWindow, activeView)
+    activeView = tabViews.get(tabId) || null
+    return { ok: true }
   }
+
+  let view = tabViews.get(tabId)
+  if (!view) {
+    view = createMainView(tabId)
+    tabViews.set(tabId, view)
+  }
+
+  if (activeView && activeView !== view) hideView(mainWindow, activeView)
+  activeView = view
+  showView(mainWindow, activeView)
+
+  const current = activeView.webContents.getURL()
+  if (!current || current === 'about:blank') {
+    isSwitching = true
+    navigationOwnerTabId = tabId
+    activeView.webContents.loadURL(url)
+      .catch(() => {})
+      .finally(() => { isSwitching = false })
+  }
+
   return { ok: true }
 })
 
 ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   if (!tabId || typeof url !== 'string') return { ok: false, error: 'Invalid arguments' }
+
   let u = url.trim()
   if (!u.startsWith('http://') && !u.startsWith('https://')) {
     u = u.includes('.') && !u.includes(' ')
       ? 'https://' + u
       : 'https://duckduckgo.com/?q=' + encodeURIComponent(u)
   }
+
+  let view = tabViews.get(tabId)
+  if (!view) {
+    view = createMainView(tabId)
+    tabViews.set(tabId, view)
+  }
+
   activeTabId = tabId
+  navigationOwnerTabId = tabId
   tabUrls.set(tabId, u)
+
+  if (activeView && activeView !== view) hideView(mainWindow, activeView)
+  activeView = view
   showView(mainWindow, activeView)
+
   await new Promise(r => setTimeout(r, 50))
   activeView.webContents.loadURL(u).catch(() => {})
+
   return { ok: true, url: u }
 })
 
 ipcMain.handle('tab-close', (_, { tabId }) => {
   tabUrls.delete(tabId)
-  if (activeTabId === tabId) { hideView(mainWindow, activeView); activeTabId = null }
+
+  const view = tabViews.get(tabId)
+  if (view) {
+    try { hideView(mainWindow, view) } catch (_) {}
+    try { view.webContents.destroy() } catch (_) {}
+    tabViews.delete(tabId)
+  }
+
+  if (activeTabId === tabId) {
+    activeView = null
+    activeTabId = null
+  }
+
   return { ok: true }
 })
 
 ipcMain.handle('tab-home', (_, { tabId }) => {
   activeTabId = tabId
   tabUrls.set(tabId, '')
-  hideView(mainWindow, activeView)
+
+  const view = tabViews.get(tabId)
+  if (view) hideView(mainWindow, view)
+
+  if (activeView === view) activeView = null
+
   return { ok: true }
 })
 
