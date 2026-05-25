@@ -65,3 +65,193 @@ contextBridge.exposeInMainWorld('nostr', {
 })
 
 window.dispatchEvent(new Event('nostr:ready'))
+
+// Zap Browser privacy hardening: hide common cookie consent/CMP overlays.
+// This does not accept tracking cookies. It only removes known consent UI noise.
+(() => {
+  const selectors = [
+    '#onetrust-banner-sdk',
+    '#onetrust-consent-sdk',
+    '.ot-sdk-container',
+    '.ot-sdk-row',
+    '.qc-cmp2-container',
+    '.qc-cmp2-main',
+    '.qc-cmp2-persistent-link',
+    '.qc-cmp-ui-container',
+    '.didomi-popup-container',
+    '.didomi-consent-popup',
+    '#didomi-host',
+    '.iubenda-cs-container',
+    '.iubenda-cs-overlay',
+    '.iubenda-cs-banner',
+    '#CybotCookiebotDialog',
+    '.CookieConsent',
+    '.cookie-consent',
+    '.cookie-banner',
+    '.cookies-banner',
+    '.cookiebar',
+    '[aria-label*="cookie" i]',
+    '[id*="cookie" i]',
+    '[class*="cookie" i]',
+    '[id*="consent" i]',
+    '[class*="consent" i]',
+    '[id*="cmp" i]',
+    '[class*="cmp" i]'
+  ]
+
+  const styleId = 'zap-cookie-banner-blocker-style'
+
+  function injectStyle() {
+    if (document.getElementById(styleId)) return
+    const style = document.createElement('style')
+    style.id = styleId
+    style.textContent = `
+      ${selectors.join(',')} {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+
+      html, body {
+        overflow: auto !important;
+      }
+    `
+    document.documentElement.appendChild(style)
+  }
+
+  function cleanup() {
+    injectStyle()
+
+    for (const sel of selectors) {
+      document.querySelectorAll(sel).forEach(el => {
+        try { el.remove() } catch (_) {}
+      })
+    }
+
+    document.documentElement.style.overflow = 'auto'
+    document.body && (document.body.style.overflow = 'auto')
+  }
+
+  cleanup()
+
+  const mo = new MutationObserver(() => cleanup())
+  mo.observe(document.documentElement, { childList: true, subtree: true })
+
+  window.addEventListener('load', cleanup)
+  setTimeout(cleanup, 500)
+  setTimeout(cleanup, 1500)
+  setTimeout(cleanup, 3000)
+})()
+
+// Zap privacy: aggressive consent wall remover v2
+(() => {
+  const killText = [
+    'cookie',
+    'cookies',
+    'consenso',
+    'privacy',
+    'riservatezza',
+    'i nostri partner',
+    'accetto',
+    'più opzioni',
+    'gestisci opzioni'
+  ]
+
+  function looksLikeConsent(el) {
+    const txt = (el.innerText || el.textContent || '').toLowerCase()
+    if (!txt || txt.length < 80) return false
+    let hits = 0
+    for (const k of killText) if (txt.includes(k)) hits++
+    return hits >= 3
+  }
+
+  function killConsent() {
+    document.querySelectorAll('body *').forEach(el => {
+      try {
+        const st = getComputedStyle(el)
+        const fixed = st.position === 'fixed' || st.position === 'sticky'
+        const big = el.getBoundingClientRect().height > 120
+        if ((fixed || big) && looksLikeConsent(el)) el.remove()
+      } catch (_) {}
+    })
+
+    document.documentElement.style.overflow = 'auto'
+    if (document.body) {
+      document.body.style.overflow = 'auto'
+      document.body.style.pointerEvents = 'auto'
+    }
+  }
+
+  killConsent()
+  new MutationObserver(killConsent).observe(document.documentElement, { childList: true, subtree: true })
+  window.addEventListener('load', killConsent)
+  setInterval(killConsent, 1000)
+})()
+
+// Zap privacy: remove large consent/paywall modals with accept/refuse buttons.
+(() => {
+  const words = [
+    'accetta e continua',
+    'rifiuta e abbonati',
+    'sei già abbonato',
+    'cookie policy',
+    'i nostri partner',
+    'pubblicità profilata',
+    'preferenze'
+  ]
+
+  function scoreText(txt) {
+    txt = (txt || '').toLowerCase()
+    return words.reduce((n, w) => n + (txt.includes(w) ? 1 : 0), 0)
+  }
+
+  function unlockPage() {
+    document.documentElement.style.overflow = 'auto'
+    document.documentElement.style.filter = 'none'
+    document.documentElement.style.pointerEvents = 'auto'
+
+    if (document.body) {
+      document.body.style.overflow = 'auto'
+      document.body.style.filter = 'none'
+      document.body.style.pointerEvents = 'auto'
+    }
+
+    document.querySelectorAll('*').forEach(el => {
+      try {
+        const st = getComputedStyle(el)
+        const z = Number(st.zIndex) || 0
+        const rect = el.getBoundingClientRect()
+        const txt = el.innerText || el.textContent || ''
+
+        const isOverlay =
+          (st.position === 'fixed' || st.position === 'absolute') &&
+          z >= 10 &&
+          rect.width > window.innerWidth * 0.35 &&
+          rect.height > window.innerHeight * 0.20
+
+        const isBackdrop =
+          (st.position === 'fixed' || st.position === 'absolute') &&
+          rect.width >= window.innerWidth * 0.8 &&
+          rect.height >= window.innerHeight * 0.8 &&
+          (
+            st.backgroundColor.includes('rgba') ||
+            st.backdropFilter !== 'none' ||
+            st.filter !== 'none'
+          )
+
+        if ((isOverlay && scoreText(txt) >= 2) || (isBackdrop && scoreText(document.body?.innerText || '') >= 2)) {
+          el.remove()
+        }
+      } catch (_) {}
+    })
+  }
+
+  unlockPage()
+  new MutationObserver(unlockPage).observe(document.documentElement, { childList: true, subtree: true, attributes: true })
+  window.addEventListener('load', unlockPage)
+  setTimeout(unlockPage, 300)
+  setTimeout(unlockPage, 1000)
+  setTimeout(unlockPage, 2500)
+  setInterval(unlockPage, 1500)
+})()

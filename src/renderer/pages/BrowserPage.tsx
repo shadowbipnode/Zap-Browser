@@ -416,11 +416,11 @@ export default function BrowserPage() {
   const togglePanel = (p: Panel) => setPanel(prev => prev === p ? null : p)
 
   // Create a new tab
-  const handleNewTab = useCallback((url?: string) => {
+  const handleNewTab = useCallback((url?: string, isPrivate = false) => {
     const id = crypto.randomUUID()
     const target = url || 'zap://newtab'
 
-    addTab(target, id)
+    addTab(target, id, isPrivate)
     setActive(id)
     setAddrVal(url || '')
     setShowSuggest(false)
@@ -433,7 +433,7 @@ export default function BrowserPage() {
       })
     }
 
-    window.zap?.tabCreate({ tabId: id }).then(() => {
+    window.zap?.tabCreate({ tabId: id, private: isPrivate }).then(() => {
       if (url && url !== 'zap://newtab') {
         window.zap?.tabNavigate({ tabId: id, url })
       } else {
@@ -754,7 +754,7 @@ export default function BrowserPage() {
           <div
             key={t.id}
             draggable
-            className={`tab ${t.id === activeId ? 'active' : ''} ${dragTabId === t.id ? 'dragging' : ''}`}
+            className={`tab ${t.id === activeId ? 'active' : ''} ${t.private ? 'private' : ''} ${dragTabId === t.id ? 'dragging' : ''}`}
             onDragStart={(e) => {
               setDragTabId(t.id)
               e.dataTransfer.effectAllowed = 'move'
@@ -776,16 +776,24 @@ export default function BrowserPage() {
             onClick={() => handleSwitchTab(t.id)}
           >
             <span className="tab-icon">
-              {t.favicon ? (
+              {t.private ? '🕶' : t.favicon ? (
                 <img src={t.favicon} alt="" style={{width:14,height:14,borderRadius:3}} />
               ) : '🌐'}
             </span>
-            <span className="tab-label">{t.loading ? L('Caricamento...','Loading...') : t.title || L('Nuova Scheda','New Tab')}</span>
+            <span className="tab-label">{t.private ? '🕶 PRIVATE · ' : ''}{t.loading ? L('Caricamento...','Loading...') : t.title || L('Nuova Scheda','New Tab')}</span>
             <button className="tab-x" onClick={e => { e.stopPropagation(); handleCloseTab(t.id) }}>×</button>
           </div>
         ))}
-        <button className="tab-new" onClick={() => handleNewTab()}>+</button>
+        <button className="tab-new" title="New tab" onClick={() => handleNewTab()}>+</button>
+        <button className="tab-new private-newtab" title="New private tab" onClick={() => handleNewTab(undefined, true)}>🕶</button>
       </div>
+
+      {activeTab?.private && (
+        <div className="private-strip">
+          <span>🕶 PRIVATE SESSION</span>
+          <span>No history saved · isolated session</span>
+        </div>
+      )}
 
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div className="toolbar">

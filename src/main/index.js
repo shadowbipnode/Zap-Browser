@@ -472,13 +472,43 @@ function createMainView(tabId = null, isPrivate = false) {
   const viewTabId = tabId
   const partition = isPrivate && tabId ? `zap-private-${tabId}` : undefined
 
+  const viewSession = partition ? session.fromPartition(partition) : session.defaultSession
+
+  setupPrivacy(viewSession)
+  setupDownloads(viewSession)
+
+  // Apply Tor proxy also to isolated private sessions.
+  try {
+    const priv = DB.getPrivacy()
+    const torEnabled = Number(priv?.tor_enabled) === 1
+
+    if (torEnabled) {
+      const host = String(priv?.tor_host || '127.0.0.1').trim()
+      const port = Number(priv?.tor_port || 9050)
+
+      viewSession.setProxy({
+        proxyRules: `socks5://${host}:${port}`,
+        proxyBypassRules: [
+          '<-loopback>',
+          'localhost',
+          '127.0.0.1',
+          '::1',
+          'localhost:3000',
+          '127.0.0.1:3000',
+        ].join(';'),
+      }).catch(() => {})
+
+      viewSession.forceReloadProxyConfig().catch(() => {})
+    }
+  } catch (_) {}
+
   const view = new BrowserView({
     webPreferences: {
       preload: path.join(__dirname, '../preload/webview.js'),
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
-      ...(partition ? { session: session.fromPartition(partition) } : {}),
+      session: viewSession,
     }
   })
 

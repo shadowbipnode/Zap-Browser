@@ -6,14 +6,16 @@ export interface Tab {
   title: string
   favicon?: string
   loading: boolean
+  private?: boolean
 }
 
-function makeTab(url = 'zap://newtab', id?: string): Tab {
+function makeTab(url = 'zap://newtab', id?: string, isPrivate = false): Tab {
   return {
     id: id || crypto.randomUUID(),
     url,
     title: url === 'zap://newtab' ? 'New Tab' : url,
     loading: false,
+    private: isPrivate,
   }
 }
 
@@ -22,7 +24,7 @@ const firstTab = makeTab('zap://newtab')
 interface Store {
   tabs: Tab[]
   activeId: string
-  addTab: (url?: string, id?: string) => void
+  addTab: (url?: string, id?: string, isPrivate?: boolean) => void
   closeTab: (id: string) => void
   setActive: (id: string) => void
   reorderTabs: (fromId: string, toId: string) => void
@@ -34,8 +36,8 @@ export const useBrowser = create<Store>((set, get) => ({
   tabs: [firstTab],
   activeId: firstTab.id,
 
-  addTab: (url, id) => {
-    const t = makeTab(url, id)
+  addTab: (url, id, isPrivate = false) => {
+    const t = makeTab(url, id, isPrivate)
     set(s => ({ tabs: [...s.tabs, t], activeId: t.id }))
   },
 
