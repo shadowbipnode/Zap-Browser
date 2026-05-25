@@ -255,3 +255,432 @@ window.dispatchEvent(new Event('nostr:ready'))
   setTimeout(unlockPage, 2500)
   setInterval(unlockPage, 1500)
 })()
+
+// ─────────────────────────────────────────────────────────────
+// Zap Browser anti-fingerprinting layer
+// Inspired by Tor Browser / Brave style mitigations.
+// ─────────────────────────────────────────────────────────────
+(() => {
+  const rand = (min, max) =>
+    Math.floor(Math.random() * (max - min + 1)) + min
+
+  // Stable-ish fake values per page session
+  const fakeHardwareConcurrency = [4, 8][rand(0,1)]
+  const fakeDeviceMemory = [4, 8][rand(0,1)]
+
+  // webdriver
+  try {
+    Object.defineProperty(Navigator.prototype, 'webdriver', {
+      get: () => false,
+      configurable: false,
+    })
+  } catch (_) {}
+
+  // hardwareConcurrency
+  try {
+    Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', {
+      get: () => fakeHardwareConcurrency,
+      configurable: false,
+    })
+  } catch (_) {}
+
+  // deviceMemory
+  try {
+    Object.defineProperty(Navigator.prototype, 'deviceMemory', {
+      get: () => fakeDeviceMemory,
+      configurable: false,
+    })
+  } catch (_) {}
+
+  // languages
+  try {
+    Object.defineProperty(Navigator.prototype, 'languages', {
+      get: () => ['en-US', 'en'],
+      configurable: false,
+    })
+  } catch (_) {}
+
+  // platform
+  try {
+    Object.defineProperty(Navigator.prototype, 'platform', {
+      get: () => 'Win32',
+      configurable: false,
+    })
+  } catch (_) {}
+
+  // plugins
+  try {
+    Object.defineProperty(Navigator.prototype, 'plugins', {
+      get: () => ({
+        length: 3,
+        0: { name: 'Chrome PDF Plugin' },
+        1: { name: 'Chrome PDF Viewer' },
+        2: { name: 'Native Client' },
+      }),
+      configurable: false,
+    })
+  } catch (_) {}
+
+  // mimeTypes
+  try {
+    Object.defineProperty(Navigator.prototype, 'mimeTypes', {
+      get: () => ({
+        length: 2,
+      }),
+      configurable: false,
+    })
+  } catch (_) {}
+
+  // screen fingerprint normalization
+  try {
+    Object.defineProperty(screen, 'colorDepth', {
+      get: () => 24,
+    })
+
+    Object.defineProperty(screen, 'pixelDepth', {
+      get: () => 24,
+    })
+  } catch (_) {}
+
+  // Timezone spoof
+  try {
+    const originalResolved =
+      Intl.DateTimeFormat.prototype.resolvedOptions
+
+    Intl.DateTimeFormat.prototype.resolvedOptions = function () {
+      const r = originalResolved.apply(this, arguments)
+      r.timeZone = 'UTC'
+      return r
+    }
+  } catch (_) {}
+
+  
+// Canvas anti-fingerprint
+try {
+  const toDataURL = HTMLCanvasElement.prototype.toDataURL
+  const toBlob = HTMLCanvasElement.prototype.toBlob
+  const getImageData = CanvasRenderingContext2D.prototype.getImageData
+
+  function noisify(canvas, context) {
+    try {
+      const shift = {
+        r: Math.floor(Math.random() * 10) - 5,
+        g: Math.floor(Math.random() * 10) - 5,
+        b: Math.floor(Math.random() * 10) - 5,
+        a: Math.floor(Math.random() * 10) - 5
+      }
+
+      const width = canvas.width
+      const height = canvas.height
+
+      if (!width || !height) return
+
+      const imageData = context.getImageData(0, 0, width, height)
+
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        imageData.data[i + 0] += shift.r
+        imageData.data[i + 1] += shift.g
+        imageData.data[i + 2] += shift.b
+        imageData.data[i + 3] += shift.a
+      }
+
+      context.putImageData(imageData, 0, 0)
+    } catch (_) {}
+  }
+
+  HTMLCanvasElement.prototype.toDataURL = function() {
+    const context = this.getContext("2d")
+    if (context) noisify(this, context)
+    return toDataURL.apply(this, arguments)
+  }
+
+  HTMLCanvasElement.prototype.toBlob = function() {
+    const context = this.getContext("2d")
+    if (context) noisify(this, context)
+    return toBlob.apply(this, arguments)
+  }
+
+  CanvasRenderingContext2D.prototype.getImageData = function() {
+    const imageData = getImageData.apply(this, arguments)
+
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      imageData.data[i + 0] += Math.floor(Math.random() * 3) - 1
+    }
+
+    return imageData
+  }
+} catch (_) {}
+
+// WebGL vendor masking
+
+  try {
+    const getParameter = WebGLRenderingContext.prototype.getParameter
+
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+      // UNMASKED_VENDOR_WEBGL
+      if (parameter === 37445) return 'Intel Inc.'
+
+      // UNMASKED_RENDERER_WEBGL
+      if (parameter === 37446) return 'Intel Iris OpenGL Engine'
+
+      return getParameter.apply(this, arguments)
+    }
+  } catch (_) {}
+
+  // Audio fingerprint slight noise
+  try {
+    const orig = AudioBuffer.prototype.getChannelData
+
+    AudioBuffer.prototype.getChannelData = function() {
+      const data = orig.apply(this, arguments)
+
+      if (!this._zapNoised) {
+        this._zapNoised = true
+
+        for (let i = 0; i < data.length; i += 100) {
+          data[i] = data[i] + 0.0000001
+        }
+      }
+
+      return data
+    }
+  } catch (_) {}
+
+  console.log('[ZapBrowser] anti-fingerprinting enabled')
+})()
+
+// WebGL2
+try {
+  const getParameter2 = WebGL2RenderingContext.prototype.getParameter
+
+  WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+    if (parameter === 37445) return 'Intel Inc.'
+    if (parameter === 37446) return 'Intel Iris OpenGL Engine'
+    return getParameter2.apply(this, arguments)
+  }
+} catch (_) {}
+
+
+// Zap anti-fingerprint hardening v2: normalize high-signal leaks
+(() => {
+  function spoof(obj, prop, value) {
+    try {
+      Object.defineProperty(obj, prop, {
+        get: () => value,
+        configurable: true,
+      })
+    } catch (_) {}
+  }
+
+  spoof(navigator, 'platform', 'MacIntel')
+  spoof(Navigator.prototype, 'platform', 'MacIntel')
+
+  spoof(navigator, 'hardwareConcurrency', 8)
+  spoof(Navigator.prototype, 'hardwareConcurrency', 8)
+
+  spoof(navigator, 'deviceMemory', 8)
+  spoof(Navigator.prototype, 'deviceMemory', 8)
+
+  spoof(navigator, 'language', 'en-US')
+  spoof(Navigator.prototype, 'language', 'en-US')
+
+  spoof(navigator, 'languages', ['en-US', 'en'])
+  spoof(Navigator.prototype, 'languages', ['en-US', 'en'])
+
+  spoof(navigator, 'vendor', 'Google Inc.')
+  spoof(Navigator.prototype, 'vendor', 'Google Inc.')
+
+  // timezone consistency with Mac/US-like fingerprint
+  try {
+    const realOffset = Date.prototype.getTimezoneOffset
+    Date.prototype.getTimezoneOffset = function () { return 0 }
+  } catch (_) {}
+
+  try {
+    const origResolved = Intl.DateTimeFormat.prototype.resolvedOptions
+    Intl.DateTimeFormat.prototype.resolvedOptions = function () {
+      const r = origResolved.apply(this, arguments)
+      r.timeZone = 'UTC'
+      return r
+    }
+  } catch (_) {}
+
+  // hide real media devices labels
+  try {
+    if (navigator.mediaDevices?.enumerateDevices) {
+      const origEnum = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices)
+      navigator.mediaDevices.enumerateDevices = async function () {
+        const devices = await origEnum()
+        return devices.map((d, i) => ({
+          deviceId: `default-${i}`,
+          groupId: 'default',
+          kind: d.kind,
+          label: '',
+          toJSON() { return this },
+        }))
+      }
+    }
+  } catch (_) {}
+
+  // block WebGL debug extension, which leaks real GPU
+  try {
+    const origGetExtension = WebGLRenderingContext.prototype.getExtension
+    WebGLRenderingContext.prototype.getExtension = function (name) {
+      if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+      return origGetExtension.apply(this, arguments)
+    }
+  } catch (_) {}
+
+  try {
+    const origGetExtension2 = WebGL2RenderingContext.prototype.getExtension
+    WebGL2RenderingContext.prototype.getExtension = function (name) {
+      if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+      return origGetExtension2.apply(this, arguments)
+    }
+  } catch (_) {}
+
+  console.log('[ZapBrowser] anti-fingerprint hardening v2 enabled')
+})()
+
+// Zap anti-fingerprint main-world injection
+(() => {
+  const code = `
+    (() => {
+      const spoof = (obj, prop, value) => {
+        try {
+          Object.defineProperty(obj, prop, {
+            get: () => value,
+            configurable: true
+          })
+        } catch (_) {}
+      }
+
+      spoof(Navigator.prototype, 'platform', 'MacIntel')
+      spoof(navigator, 'platform', 'MacIntel')
+
+      spoof(Navigator.prototype, 'hardwareConcurrency', 8)
+      spoof(navigator, 'hardwareConcurrency', 8)
+
+      spoof(Navigator.prototype, 'deviceMemory', 8)
+      spoof(navigator, 'deviceMemory', 8)
+
+      spoof(Navigator.prototype, 'language', 'en-US')
+      spoof(navigator, 'language', 'en-US')
+
+      spoof(Navigator.prototype, 'languages', ['en-US', 'en'])
+      spoof(navigator, 'languages', ['en-US', 'en'])
+
+      spoof(Navigator.prototype, 'vendor', 'Google Inc.')
+      spoof(navigator, 'vendor', 'Google Inc.')
+
+      spoof(Navigator.prototype, 'webdriver', false)
+      spoof(navigator, 'webdriver', false)
+
+      try {
+        Date.prototype.getTimezoneOffset = function () { return 0 }
+      } catch (_) {}
+
+      try {
+        const resolved = Intl.DateTimeFormat.prototype.resolvedOptions
+        Intl.DateTimeFormat.prototype.resolvedOptions = function () {
+          const r = resolved.apply(this, arguments)
+          r.timeZone = 'UTC'
+          return r
+        }
+      } catch (_) {}
+
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+          navigator.mediaDevices.enumerateDevices = async () => []
+        }
+      } catch (_) {}
+
+      try {
+        const ge = WebGLRenderingContext.prototype.getExtension
+        WebGLRenderingContext.prototype.getExtension = function(name) {
+          if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+          return ge.apply(this, arguments)
+        }
+      } catch (_) {}
+
+      try {
+        const ge2 = WebGL2RenderingContext.prototype.getExtension
+        WebGL2RenderingContext.prototype.getExtension = function(name) {
+          if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+          return ge2.apply(this, arguments)
+        }
+      } catch (_) {}
+
+      console.log('[ZapBrowser] main-world anti-fingerprint active')
+    })()
+  `
+
+  const inject = () => {
+    try {
+      const s = document.createElement('script')
+      s.textContent = code
+      ;(document.documentElement || document.head).appendChild(s)
+      s.remove()
+    } catch (_) {}
+  }
+
+  inject()
+  document.addEventListener('DOMContentLoaded', inject, { once: true })
+})()
+
+// Zap anti-fingerprint main-world injection via Electron webFrame
+try {
+  const { webFrame } = require('electron')
+
+  const code = `
+    (() => {
+      const spoof = (obj, prop, value) => {
+        try {
+          Object.defineProperty(obj, prop, {
+            get: () => value,
+            configurable: true
+          })
+        } catch (_) {}
+      }
+
+      spoof(Navigator.prototype, 'platform', 'Linux x86_64')
+      spoof(navigator, 'platform', 'Linux x86_64')
+
+      spoof(Navigator.prototype, 'hardwareConcurrency', 4)
+      spoof(navigator, 'hardwareConcurrency', 4)
+
+      spoof(Navigator.prototype, 'deviceMemory', 4)
+      spoof(navigator, 'deviceMemory', 4)
+
+      spoof(Navigator.prototype, 'language', 'en-US')
+      spoof(navigator, 'language', 'en-US')
+
+      spoof(Navigator.prototype, 'languages', ['en-US', 'en'])
+      spoof(navigator, 'languages', ['en-US', 'en'])
+
+      spoof(Navigator.prototype, 'webdriver', false)
+      spoof(navigator, 'webdriver', false)
+
+      try {
+        navigator.mediaDevices.enumerateDevices = async () => []
+      } catch (_) {}
+
+      try {
+        Date.prototype.getTimezoneOffset = function () { return 0 }
+      } catch (_) {}
+
+      try {
+        const ro = Intl.DateTimeFormat.prototype.resolvedOptions
+        Intl.DateTimeFormat.prototype.resolvedOptions = function () {
+          const r = ro.apply(this, arguments)
+          r.timeZone = 'UTC'
+          return r
+        }
+      } catch (_) {}
+
+      console.log('[ZapBrowser] real main-world anti-fingerprint active')
+    })()
+  `
+
+  webFrame.executeJavaScript(code).catch(() => {})
+} catch (_) {}

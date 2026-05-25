@@ -38,6 +38,56 @@ const {
 const isDev = !app.isPackaged
 const ZAP_DEBUG = process.env.ZAP_DEBUG === '1'
 
+
+app.commandLine.appendSwitch(
+  'disable-features',
+  [
+    'UserAgentClientHint',
+    'AcceptCHFrame',
+    'MediaRouter',
+    'OptimizationHints',
+    'AutofillServerCommunication',
+    'PrivacySandboxSettings4',
+  ].join(',')
+)
+
+app.commandLine.appendSwitch('disable-rtc-smoothness-algorithm')
+
+app.commandLine.appendSwitch(
+  'js-flags',
+  '--random-seed=1157259157'
+)
+
+app.commandLine.appendSwitch(
+  'force-dark-mode'
+)
+
+
+
+
+app.commandLine.appendSwitch(
+  'disable-features',
+  [
+    'UserAgentClientHint',
+    'AcceptCHFrame',
+    'MediaRouter',
+    'OptimizationHints',
+    'AutofillServerCommunication',
+    'PrivacySandboxSettings4',
+  ].join(',')
+)
+
+app.commandLine.appendSwitch('disable-rtc-smoothness-algorithm')
+
+app.commandLine.appendSwitch(
+  'js-flags',
+  '--random-seed=1157259157'
+)
+
+app.commandLine.appendSwitch('force-dark-mode')
+
+
+
 let mainWindow  = null
 let activeView  = null
 const tabViews  = new Map()
@@ -48,6 +98,63 @@ let navigationOwnerTabId = null
 let isSwitching = false
 const activeDownloads = new Map()
 const lastTabUpdates = new Map()
+
+const FINGERPRINT_PROFILES = [
+  {
+    name: 'linux-chrome-utc',
+    platform: 'Linux x86_64',
+    hardwareConcurrency: 4,
+    deviceMemory: 4,
+    timezone: 'UTC',
+    timezoneOffset: 0,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Intel, Mesa Intel UHD Graphics, OpenGL 4.6)',
+  },
+  {
+    name: 'linux-chrome-eu',
+    platform: 'Linux x86_64',
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    timezone: 'Europe/Rome',
+    timezoneOffset: -120,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Intel, Mesa Intel UHD Graphics, OpenGL 4.6)',
+  },
+  {
+    name: 'windows-chrome-utc',
+    platform: 'Win32',
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    timezone: 'UTC',
+    timezoneOffset: 0,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0)',
+  },
+  {
+    name: 'mac-chrome-utc',
+    platform: 'MacIntel',
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    timezone: 'UTC',
+    timezoneOffset: 0,
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webglVendor: 'Google Inc.',
+    webglRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1)',
+  },
+]
+
+const fingerprintProfile =
+  FINGERPRINT_PROFILES[Math.floor(Math.random() * FINGERPRINT_PROFILES.length)]
+
+console.log('[Fingerprint] active profile:', fingerprintProfile.name)
+
 let addressSuggestWindow = null
 
 
@@ -468,6 +575,103 @@ function sendTabUpdated(tabId, patch = {}) {
   mainWindow.webContents.send('tab-updated', { tabId, ...patch })
 }
 
+
+function injectAntiFingerprint(view) {
+  if (!view || view.webContents.isDestroyed()) return
+
+  const fp = fingerprintProfile
+
+  const code = `
+    (() => {
+      const fp = ${JSON.stringify(fp)}
+
+      const spoof = (obj, prop, value) => {
+        try {
+          Object.defineProperty(obj, prop, {
+            get: () => value,
+            configurable: true
+          })
+        } catch (_) {}
+      }
+
+      spoof(Navigator.prototype, 'platform', fp.platform)
+      spoof(navigator, 'platform', fp.platform)
+
+      spoof(Navigator.prototype, 'hardwareConcurrency', fp.hardwareConcurrency)
+      spoof(navigator, 'hardwareConcurrency', fp.hardwareConcurrency)
+
+      spoof(Navigator.prototype, 'deviceMemory', fp.deviceMemory)
+      spoof(navigator, 'deviceMemory', fp.deviceMemory)
+
+      spoof(Navigator.prototype, 'language', fp.language)
+      spoof(navigator, 'language', fp.language)
+
+      spoof(Navigator.prototype, 'languages', fp.languages)
+      spoof(navigator, 'languages', fp.languages)
+
+      spoof(Navigator.prototype, 'webdriver', false)
+      spoof(navigator, 'webdriver', false)
+
+      try {
+        Date.prototype.getTimezoneOffset = function () {
+          return fp.timezoneOffset
+        }
+      } catch (_) {}
+
+      try {
+        const ro = Intl.DateTimeFormat.prototype.resolvedOptions
+        Intl.DateTimeFormat.prototype.resolvedOptions = function () {
+          const r = ro.apply(this, arguments)
+          r.timeZone = fp.timezone
+          return r
+        }
+      } catch (_) {}
+
+      try {
+        if (navigator.mediaDevices) {
+          navigator.mediaDevices.enumerateDevices = async () => []
+        }
+      } catch (_) {}
+
+      try {
+        const ge = WebGLRenderingContext.prototype.getExtension
+        WebGLRenderingContext.prototype.getExtension = function(name) {
+          if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+          return ge.apply(this, arguments)
+        }
+
+        const gp = WebGLRenderingContext.prototype.getParameter
+        WebGLRenderingContext.prototype.getParameter = function(param) {
+          if (param === 37445) return fp.webglVendor
+          if (param === 37446) return fp.webglRenderer
+          return gp.apply(this, arguments)
+        }
+      } catch (_) {}
+
+      try {
+        const ge2 = WebGL2RenderingContext.prototype.getExtension
+        WebGL2RenderingContext.prototype.getExtension = function(name) {
+          if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null
+          return ge2.apply(this, arguments)
+        }
+
+        const gp2 = WebGL2RenderingContext.prototype.getParameter
+        WebGL2RenderingContext.prototype.getParameter = function(param) {
+          if (param === 37445) return fp.webglVendor
+          if (param === 37446) return fp.webglRenderer
+          return gp2.apply(this, arguments)
+        }
+      } catch (_) {}
+
+      window.__zapAntiFingerprint = true
+      window.__zapFingerprintProfile = fp.name
+    })()
+  `
+
+  view.webContents.executeJavaScript(code, true).catch(() => {})
+}
+
+
 function createMainView(tabId = null, isPrivate = false) {
   const viewTabId = tabId
   const partition = isPrivate && tabId ? `zap-private-${tabId}` : undefined
@@ -511,6 +715,10 @@ function createMainView(tabId = null, isPrivate = false) {
       session: viewSession,
     }
   })
+
+  view.webContents.on('dom-ready', () => injectAntiFingerprint(view))
+  view.webContents.on('did-finish-load', () => injectAntiFingerprint(view))
+  view.webContents.on('did-frame-finish-load', () => injectAntiFingerprint(view))
 
   view.webContents.on('console-message', (_event, level, message) => {
     if (!ZAP_DEBUG) return
