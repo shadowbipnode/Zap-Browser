@@ -2,6 +2,8 @@
 
 > A privacy-focused sovereign browser with native Lightning, Cashu and Nostr workflows.
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-pink?logo=github-sponsors)](https://github.com/sponsors/shadowbipnode)
+
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-blue)
 ![Status](https://img.shields.io/badge/status-beta-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)

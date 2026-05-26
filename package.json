@@ -12,7 +12,7 @@
   },
   "build": {
     "appId": "com.zapbrowser.app",
-    "productName": "Zap Browser",
+    "productName": "Zap-Browser",
     "linux": {
       "target": [
         "AppImage",
@@ -24,7 +24,7 @@
       "maintainer": "Zap Browser Contributors <dev@zapbrowser.org>",
       "desktop": {
         "Name": "Zap Browser",
-        "StartupWMClass": "Zap Browser",
+        "StartupWMClass": "zap-browser",
         "Comment": "Privacy-first sovereign browser with Lightning, Cashu and Nostr",
         "Categories": "Network;WebBrowser;"
       },
@@ -78,9 +78,12 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Zap Browser"
+<<<<<<< HEAD
     },
     "portable": {
       "artifactName": "Zap-Browser-Portable-${version}-${arch}.${ext}"
+=======
+>>>>>>> develop
     }
   },
   "dependencies": {
