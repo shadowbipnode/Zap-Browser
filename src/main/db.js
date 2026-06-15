@@ -1,6 +1,7 @@
 'use strict'
 
 const path      = require('path')
+const crypto    = require('crypto')
 const { app }   = require('electron')
 
 let db = null
@@ -345,6 +346,36 @@ function listBrowserProfiles() {
   `).all()
 }
 
+function createBrowserProfile({ name }) {
+  const title = String(name || '').trim()
+  if (!title) throw new Error('Profile name is required')
+
+  const id = crypto.randomUUID()
+  const ts = now()
+
+  db.prepare(`
+    INSERT INTO browser_profiles
+      (id, name, is_default, created_at, updated_at, last_used_at)
+    VALUES (?, ?, 0, ?, ?, ?)
+  `).run(id, title, ts, ts, ts)
+
+  return getBrowserProfileById(id)
+}
+
+function renameBrowserProfile(id, name) {
+  const profileId = String(id || '')
+  const title = String(name || '').trim()
+  if (!title) throw new Error('Profile name is required')
+
+  const existing = getBrowserProfileById(profileId)
+  if (!existing) throw new Error('Browser profile not found')
+
+  const ts = now()
+  db.prepare('UPDATE browser_profiles SET name=?, updated_at=? WHERE id=?').run(title, ts, profileId)
+
+  return getBrowserProfileById(profileId)
+}
+
 function setActiveBrowserProfile(id) {
   const profile = db.prepare('SELECT * FROM browser_profiles WHERE id=?').get(String(id || ''))
   if (!profile) throw new Error('Browser profile not found')
@@ -600,7 +631,7 @@ function clearNostrPermissions(browserProfileId = null) {
 module.exports = {
   init,
   getSetting, setSetting,
-  getActiveBrowserProfile, listBrowserProfiles, setActiveBrowserProfile, getBrowserProfileById,
+  getActiveBrowserProfile, listBrowserProfiles, createBrowserProfile, renameBrowserProfile, setActiveBrowserProfile, getBrowserProfileById,
   getPrivacy, setPrivacy,
   addDownload, getDownloads, clearDownloads,
   getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,

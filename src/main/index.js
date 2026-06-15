@@ -1592,6 +1592,15 @@ ipcMain.handle('open-in-new-tab', (_, { url }) => {
 // ── IPC: browser profiles ────────────────────────────────────────────────────
 ipcMain.handle('browser-profile-active', () => DB.getActiveBrowserProfile())
 ipcMain.handle('browser-profile-list', () => DB.listBrowserProfiles())
+ipcMain.handle('browser-profile-create', (_, { name }) => {
+  V.assert(typeof name === 'string' && name.trim().length > 0 && name.length <= 120, 'Invalid profile name')
+  return DB.createBrowserProfile({ name: name.trim() })
+})
+ipcMain.handle('browser-profile-rename', (_, { id, name }) => {
+  V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
+  V.assert(typeof name === 'string' && name.trim().length > 0 && name.length <= 120, 'Invalid profile name')
+  return DB.renameBrowserProfile(id, name.trim())
+})
 ipcMain.handle('browser-profile-set-active', (_, { id }) => {
   V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
   return DB.setActiveBrowserProfile(id)

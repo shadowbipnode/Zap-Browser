@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('zap', {
   // Browser profiles
   browserProfileActive: () => ipcRenderer.invoke('browser-profile-active'),
   browserProfileList: () => ipcRenderer.invoke('browser-profile-list'),
+  browserProfileCreate: (a) => ipcRenderer.invoke('browser-profile-create', a),
+  browserProfileRename: (a) => ipcRenderer.invoke('browser-profile-rename', a),
   browserProfileSetActive: (a) => ipcRenderer.invoke('browser-profile-set-active', a),
 
   // Privacy
