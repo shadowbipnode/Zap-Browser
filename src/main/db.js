@@ -203,6 +203,7 @@ function init() {
 migrateNwcConnectionsSchema()
 migratePrivacySettingsSchema()
 migrateBrowserProfiles()
+migrateNostrPermissionsSchema()
 }
 
 function migrateBrowserProfiles() {
@@ -241,6 +242,53 @@ function migrateBrowserProfiles() {
       WHERE id=1
     `).run()
   }
+}
+
+function migrateNostrPermissionsSchema() {
+  const columns = db
+    .prepare('PRAGMA table_info(nostr_permissions)')
+    .all()
+    .map(c => c.name)
+
+  if (columns.includes('browser_profile_id')) return
+
+  const ts = now()
+
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS nostr_permissions_next (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        browser_profile_id TEXT    NOT NULL DEFAULT 'default' REFERENCES browser_profiles(id),
+        origin             TEXT    NOT NULL,
+        action             TEXT    NOT NULL,
+        decision           TEXT    NOT NULL,
+        created_at         INTEGER NOT NULL,
+        updated_at         INTEGER NOT NULL,
+        UNIQUE(browser_profile_id, origin, action)
+      )
+    `)
+
+    db.prepare(`
+      INSERT OR IGNORE INTO nostr_permissions_next
+        (browser_profile_id, origin, action, decision, created_at, updated_at)
+      SELECT
+        'default',
+        origin,
+        action,
+        decision,
+        COALESCE(created_at, ?),
+        COALESCE(updated_at, ?)
+      FROM nostr_permissions
+      ORDER BY id ASC
+    `).run(ts, ts)
+
+    db.exec('DROP TABLE nostr_permissions')
+    db.exec('ALTER TABLE nostr_permissions_next RENAME TO nostr_permissions')
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_permissions_browser_profile_origin_action
+      ON nostr_permissions(browser_profile_id, origin, action)
+    `)
+  })()
 }
 function migrateNwcConnectionsSchema() {
   const columns = db
@@ -493,41 +541,59 @@ function getActiveNostrProfileId() {
   return row?.id || null
 }
 
-function getNostrPermission(origin, action) {
-  return db
-    .prepare('SELECT decision FROM nostr_permissions WHERE origin=? AND action=?')
-    .get(origin, action) || null
+function getActiveBrowserProfileId() {
+  return getActiveBrowserProfile()?.id || 'default'
 }
 
-function setNostrPermission(origin, action, decision) {
+function getNostrPermission(origin, action, browserProfileId = null) {
+  return db
+    .prepare(`
+      SELECT decision
+      FROM nostr_permissions
+      WHERE browser_profile_id=? AND origin=? AND action=?
+    `)
+    .get(browserProfileId || getActiveBrowserProfileId(), origin, action) || null
+}
+
+function setNostrPermission(origin, action, decision, browserProfileId = null) {
   const ts = now()
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
 
   db.prepare(`
-    INSERT INTO nostr_permissions(origin, action, decision, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(origin, action)
+    INSERT INTO nostr_permissions(browser_profile_id, origin, action, decision, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(browser_profile_id, origin, action)
     DO UPDATE SET decision=excluded.decision, updated_at=excluded.updated_at
-  `).run(origin, action, decision, ts, ts)
+  `).run(targetBrowserProfileId, origin, action, decision, ts, ts)
 
-  return { origin, action, decision }
+  return { browser_profile_id: targetBrowserProfileId, profile_id: targetBrowserProfileId, origin, action, decision }
 }
 
-function listNostrPermissions() {
+function listNostrPermissions(browserProfileId = null) {
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+
   return db
-    .prepare('SELECT profile_id, origin, action, decision, updated_at FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) ORDER BY updated_at DESC')
-    .all()
+    .prepare(`
+      SELECT browser_profile_id, browser_profile_id AS profile_id, origin, action, decision, updated_at
+      FROM nostr_permissions
+      WHERE browser_profile_id=?
+      ORDER BY updated_at DESC
+    `)
+    .all(targetBrowserProfileId)
 }
 
-function removeNostrPermission(origin, action) {
+function removeNostrPermission(origin, action, browserProfileId = null) {
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+
   db
-    .prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) AND origin=? AND action=?')
-    .run(origin, action)
+    .prepare('DELETE FROM nostr_permissions WHERE browser_profile_id=? AND origin=? AND action=?')
+    .run(targetBrowserProfileId, origin, action)
 
   return { ok: true }
 }
 
-function clearNostrPermissions() {
-  db.prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1)').run()
+function clearNostrPermissions(browserProfileId = null) {
+  db.prepare('DELETE FROM nostr_permissions WHERE browser_profile_id=?').run(browserProfileId || getActiveBrowserProfileId())
   return { ok: true }
 }
 

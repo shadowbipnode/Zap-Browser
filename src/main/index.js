@@ -101,6 +101,7 @@ const activeDownloads = new Map()
 const lastTabUpdates = new Map()
 const configuredSessions = new Set()
 const downloadSessions = new Set()
+const webContentsProfileIds = new Map()
 
 const FINGERPRINT_PROFILES = [
   {
@@ -431,6 +432,23 @@ function getIpcOrigin(ipcEvent) {
   }
 }
 
+function getIpcBrowserProfileId(ipcEvent) {
+  const senderId = ipcEvent.sender?.id
+  if (senderId && webContentsProfileIds.has(senderId)) {
+    return webContentsProfileIds.get(senderId)
+  }
+
+  for (const [tabId, view] of tabViews.entries()) {
+    if (view?.webContents?.id === senderId) {
+      const profileId = getBrowserProfileForTab(tabId).id
+      webContentsProfileIds.set(senderId, profileId)
+      return profileId
+    }
+  }
+
+  return getActiveBrowserProfile().id
+}
+
 function summarizeNostrEvent(event) {
   if (!event || typeof event !== 'object') {
     return 'Unknown event'
@@ -471,7 +489,8 @@ function summarizeNostrRequest(action, payload) {
 }
 async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
   const origin = getIpcOrigin(ipcEvent)
-  const key = `${origin}:${action}`
+  const browserProfileId = getIpcBrowserProfileId(ipcEvent)
+  const key = `${browserProfileId}:${origin}:${action}`
 
   const sessionDecision = nostrSessionPermissions.get(key)
 
@@ -483,7 +502,7 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
     return false
   }
 
-  const stored = DB.getNostrPermission(origin, action)
+  const stored = DB.getNostrPermission(origin, action, browserProfileId)
 
   if (stored?.decision === 'allow') {
     return true
@@ -517,12 +536,12 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
   }
 
   if (result.response === 1) {
-    DB.setNostrPermission(origin, action, 'allow')
+    DB.setNostrPermission(origin, action, 'allow', browserProfileId)
     return true
   }
 
   if (result.response === 2) {
-    DB.setNostrPermission(origin, action, 'deny')
+    DB.setNostrPermission(origin, action, 'deny', browserProfileId)
     return false
   }
 
@@ -782,6 +801,8 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
       session: viewSession,
     }
   })
+
+  webContentsProfileIds.set(view.webContents.id, viewProfile.id)
 
   view.webContents.on('dom-ready', () => injectAntiFingerprint(view))
   view.webContents.on('did-finish-load', () => injectAntiFingerprint(view))
@@ -1676,6 +1697,7 @@ ipcMain.handle('tab-close', (_, { tabId }) => {
       }
     } catch (_) {}
 
+    try { webContentsProfileIds.delete(view.webContents.id) } catch (_) {}
     try { view.webContents.destroy() } catch (_) {}
     tabViews.delete(tabId)
   }
@@ -2034,7 +2056,9 @@ ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
 
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
-  const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
+  const row = DB._db()
+    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get()
 
   if (!row) throw new Error('No Nostr profile found')
 
@@ -2068,7 +2092,9 @@ ipcMain.handle('nostr-nip04-decrypt', async (ipcEvent, { pubkey, text }) => {
 
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
-  const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
+  const row = DB._db()
+    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get()
 
   if (!row) throw new Error('No Nostr profile found')
 
