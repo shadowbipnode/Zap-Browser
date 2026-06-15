@@ -99,6 +99,8 @@ let navigationOwnerTabId = null
 let isSwitching = false
 const activeDownloads = new Map()
 const lastTabUpdates = new Map()
+const configuredSessions = new Set()
+const downloadSessions = new Set()
 
 const FINGERPRINT_PROFILES = [
   {
@@ -167,6 +169,63 @@ const UA_POOL = [
 ]
 let currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
 const nostrSessionPermissions = new Map()
+
+function safePartitionId(value) {
+  return String(value || 'default').replace(/[^a-zA-Z0-9_-]/g, '-')
+}
+
+function getActiveBrowserProfile() {
+  return DB.getActiveBrowserProfile() || { id: 'default', name: 'Default', is_default: 1 }
+}
+
+function getBrowserProfileForTab(tabId) {
+  const meta = tabMeta.get(tabId) || {}
+  return DB.getBrowserProfileById(meta.profileId) || getActiveBrowserProfile()
+}
+
+function getProfileSession(profile) {
+  if (!profile || profile.id === 'default') {
+    return session.defaultSession
+  }
+
+  return session.fromPartition(`persist:zap-profile-${safePartitionId(profile.id)}`)
+}
+
+function getPrivateSession(profile, tabId) {
+  return session.fromPartition(`zap-private-${safePartitionId(profile?.id)}-${safePartitionId(tabId)}`)
+}
+
+function setUserAgentForSession(ses) {
+  const priv = DB.getPrivacy()
+  ses.setUserAgent(priv?.ua_mode === 'default' ? '' : currentUA)
+}
+
+function setUserAgentForConfiguredSessions() {
+  for (const ses of configuredSessions) {
+    try { setUserAgentForSession(ses) } catch (_) {}
+  }
+}
+
+function configureBrowserSession(ses) {
+  if (!ses) return ses
+
+  configuredSessions.add(ses)
+  setUserAgentForSession(ses)
+  setupPrivacy(ses)
+  setupDownloads(ses)
+  applyProxyToSession(ses).catch(() => {})
+
+  return ses
+}
+
+function getTabSession(tabId, isPrivate = false, profile = null) {
+  const targetProfile = profile || getBrowserProfileForTab(tabId)
+  const ses = isPrivate
+    ? getPrivateSession(targetProfile, tabId)
+    : getProfileSession(targetProfile)
+
+  return configureBrowserSession(ses)
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -578,7 +637,15 @@ async function applyProxyToSession(ses) {
 }
 
 async function applyNetworkProxy() {
-  const result = await applyProxyToSession(session.defaultSession)
+  configuredSessions.add(session.defaultSession)
+
+  let result = await applyProxyToSession(session.defaultSession)
+
+  for (const ses of configuredSessions) {
+    try {
+      result = await applyProxyToSession(ses)
+    } catch (_) {}
+  }
 
   for (const view of tabViews.values()) {
     try {
@@ -701,17 +768,10 @@ function injectAntiFingerprint(view) {
 }
 
 
-function createMainView(tabId = null, isPrivate = false) {
+function createMainView(tabId = null, isPrivate = false, profile = null) {
   const viewTabId = tabId
-  const partition = isPrivate && tabId ? `zap-private-${tabId}` : undefined
-
-  const viewSession = partition ? session.fromPartition(partition) : session.defaultSession
-
-  setupPrivacy(viewSession)
-  setupDownloads(viewSession)
-
-  // Apply Tor/proxy policy also to isolated private sessions.
-  applyProxyToSession(viewSession).catch(() => {})
+  const viewProfile = profile || getBrowserProfileForTab(tabId)
+  const viewSession = getTabSession(tabId, isPrivate, viewProfile)
 
   const view = new BrowserView({
     webPreferences: {
@@ -1362,6 +1422,9 @@ function setupPrivacy(ses) {
 }
 
 function setupDownloads(ses) {
+  if (downloadSessions.has(ses)) return
+  downloadSessions.add(ses)
+
   ses.on('will-download', (_event, item) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     const fileName = item.getFilename()
@@ -1437,11 +1500,9 @@ function createWindow() {
     },
   })
 
-  session.defaultSession.setUserAgent(currentUA)
   activeView = null
 
-  setupPrivacy(session.defaultSession)
-  setupDownloads(session.defaultSession)
+  configureBrowserSession(session.defaultSession)
   applyNetworkProxy().catch(err => console.error('[Proxy] apply failed', err))
 
   bl.init((size) => {
@@ -1507,14 +1568,24 @@ ipcMain.handle('open-in-new-tab', (_, { url }) => {
   mainWindow?.webContents.send('open-new-tab', { url })
 })
 
+// ── IPC: browser profiles ────────────────────────────────────────────────────
+ipcMain.handle('browser-profile-active', () => DB.getActiveBrowserProfile())
+ipcMain.handle('browser-profile-list', () => DB.listBrowserProfiles())
+ipcMain.handle('browser-profile-set-active', (_, { id }) => {
+  V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
+  return DB.setActiveBrowserProfile(id)
+})
+
 // ── IPC: tabs ─────────────────────────────────────────────────────────────────
 ipcMain.handle('tab-create', (_, { tabId, private: isPrivate = false }) => {
+  const profile = getActiveBrowserProfile()
+
   tabUrls.set(tabId, '')
-  tabMeta.set(tabId, { private: !!isPrivate })
+  tabMeta.set(tabId, { private: !!isPrivate, profileId: profile.id })
   activeTabId = tabId
 
   if (!tabViews.has(tabId)) {
-    tabViews.set(tabId, createMainView(tabId, !!isPrivate))
+    tabViews.set(tabId, createMainView(tabId, !!isPrivate, profile))
   }
 
   if (activeView) hideView(mainWindow, activeView)
@@ -1523,7 +1594,7 @@ ipcMain.handle('tab-create', (_, { tabId, private: isPrivate = false }) => {
   // Empty tabs are rendered by the React shell, not BrowserView.
   hideView(mainWindow, activeView)
 
-  return { ok: true }
+  return { ok: true, profileId: profile.id }
 })
 
 ipcMain.handle('tab-switch', (_, { tabId }) => {
@@ -1539,7 +1610,7 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
   let view = tabViews.get(tabId)
   if (!view) {
     const meta = tabMeta.get(tabId) || {}
-    view = createMainView(tabId, !!meta.private)
+    view = createMainView(tabId, !!meta.private, getBrowserProfileForTab(tabId))
     tabViews.set(tabId, view)
   }
 
@@ -1572,7 +1643,7 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   let view = tabViews.get(tabId)
   if (!view) {
     const meta = tabMeta.get(tabId) || {}
-    view = createMainView(tabId, !!meta.private)
+    view = createMainView(tabId, !!meta.private, getBrowserProfileForTab(tabId))
     tabViews.set(tabId, view)
   }
 
@@ -1751,7 +1822,7 @@ ipcMain.handle('show-ua-menu', () => {
       click: () => {
         DB.setPrivacy('ua_mode', 'rotate')
         currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-        session.defaultSession.setUserAgent(currentUA)
+        setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
       },
     },
@@ -1761,7 +1832,7 @@ ipcMain.handle('show-ua-menu', () => {
       checked: current === 'default',
       click: () => {
         DB.setPrivacy('ua_mode', 'default')
-        session.defaultSession.setUserAgent('')
+        setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'default', ua: '' })
       },
     },
@@ -1770,7 +1841,7 @@ ipcMain.handle('show-ua-menu', () => {
       label: 'Rotate now',
       click: () => {
         currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-        session.defaultSession.setUserAgent(currentUA)
+        setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
       },
     },
@@ -1795,12 +1866,12 @@ ipcMain.handle('set-overlay-block', (_, { enabled }) => DB.setPrivacy('overlay_b
 ipcMain.handle('set-ua-mode',  (_, { mode }) => {
   DB.setPrivacy('ua_mode', mode)
   if (mode === 'rotate') currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-  session.defaultSession.setUserAgent(mode === 'default' ? '' : currentUA)
+  setUserAgentForConfiguredSessions()
   return currentUA
 })
 ipcMain.handle('rotate-ua', () => {
   currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-  session.defaultSession.setUserAgent(currentUA)
+  setUserAgentForConfiguredSessions()
   return currentUA
 })
 ipcMain.handle('get-blocked-count',  () => bl.getBlockedCount())
@@ -2279,13 +2350,19 @@ ipcMain.handle('get-history',   (_, { limit } = {}) => {
 })
 ipcMain.handle('clear-history', () => DB.clearHistory())
 ipcMain.handle('clear-cookies', async () => {
-  await session.defaultSession.clearStorageData({
-    storages: ['cookies', 'localstorage', 'sessionstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage'],
-  })
+  const storages = ['cookies', 'localstorage', 'sessionstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage']
+
+  for (const ses of configuredSessions) {
+    await ses.clearStorageData({ storages })
+  }
+
   return { ok: true }
 })
 ipcMain.handle('clear-cache', async () => {
-  await session.defaultSession.clearCache()
+  for (const ses of configuredSessions) {
+    await ses.clearCache()
+  }
+
   return { ok: true }
 })
 ipcMain.handle('reset-browser', () => {

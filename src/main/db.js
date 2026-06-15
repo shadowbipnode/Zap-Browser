@@ -14,6 +14,24 @@ function init() {
 
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS browser_profiles (
+      id           TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      is_default   INTEGER NOT NULL DEFAULT 0,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      last_used_at INTEGER NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_profiles_default
+      ON browser_profiles(is_default)
+      WHERE is_default=1;
+
+    CREATE TABLE IF NOT EXISTS browser_profile_state (
+      id                INTEGER PRIMARY KEY CHECK (id=1),
+      active_profile_id TEXT NOT NULL REFERENCES browser_profiles(id)
+    );
+
     CREATE TABLE IF NOT EXISTS downloads (
       id TEXT PRIMARY KEY,
       filename TEXT,
@@ -184,6 +202,45 @@ function init() {
 
 migrateNwcConnectionsSchema()
 migratePrivacySettingsSchema()
+migrateBrowserProfiles()
+}
+
+function migrateBrowserProfiles() {
+  const ts = now()
+
+  db.prepare(`
+    INSERT OR IGNORE INTO browser_profiles
+      (id, name, is_default, created_at, updated_at, last_used_at)
+    VALUES ('default', 'Default', 1, ?, ?, ?)
+  `).run(ts, ts, ts)
+
+  const active = db.prepare(`
+    SELECT active_profile_id
+    FROM browser_profile_state
+    WHERE id=1
+  `).get()
+
+  if (!active) {
+    db.prepare(`
+      INSERT INTO browser_profile_state(id, active_profile_id)
+      VALUES (1, 'default')
+    `).run()
+    return
+  }
+
+  const exists = db.prepare(`
+    SELECT id
+    FROM browser_profiles
+    WHERE id=?
+  `).get(active.active_profile_id)
+
+  if (!exists) {
+    db.prepare(`
+      UPDATE browser_profile_state
+      SET active_profile_id='default'
+      WHERE id=1
+    `).run()
+  }
 }
 function migrateNwcConnectionsSchema() {
   const columns = db
@@ -219,6 +276,40 @@ const now = () => Math.floor(Date.now() / 1000)
 function getSetting(key) {
   const row = db.prepare('SELECT value FROM settings WHERE key=?').get(key)
   return row ? row.value : null
+}
+
+// ── Browser profiles ──────────────────────────────────────────────────────────
+function getActiveBrowserProfile() {
+  return db.prepare(`
+    SELECT p.*
+    FROM browser_profiles p
+    JOIN browser_profile_state s ON s.active_profile_id=p.id
+    WHERE s.id=1
+    LIMIT 1
+  `).get() || db.prepare('SELECT * FROM browser_profiles WHERE id=?').get('default')
+}
+
+function listBrowserProfiles() {
+  return db.prepare(`
+    SELECT *
+    FROM browser_profiles
+    ORDER BY is_default DESC, last_used_at DESC, name ASC
+  `).all()
+}
+
+function setActiveBrowserProfile(id) {
+  const profile = db.prepare('SELECT * FROM browser_profiles WHERE id=?').get(String(id || ''))
+  if (!profile) throw new Error('Browser profile not found')
+
+  const ts = now()
+  db.prepare('UPDATE browser_profiles SET last_used_at=?, updated_at=? WHERE id=?').run(ts, ts, profile.id)
+  db.prepare('UPDATE browser_profile_state SET active_profile_id=? WHERE id=1').run(profile.id)
+
+  return getActiveBrowserProfile()
+}
+
+function getBrowserProfileById(id) {
+  return db.prepare('SELECT * FROM browser_profiles WHERE id=?').get(String(id || '')) || null
 }
 function setSetting(key, value) {
   db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, value)
@@ -443,6 +534,7 @@ function clearNostrPermissions() {
 module.exports = {
   init,
   getSetting, setSetting,
+  getActiveBrowserProfile, listBrowserProfiles, setActiveBrowserProfile, getBrowserProfileById,
   getPrivacy, setPrivacy,
   addDownload, getDownloads, clearDownloads,
   getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,
@@ -492,4 +584,3 @@ function getDownloads() {
 function clearDownloads() {
   db.prepare('DELETE FROM downloads').run()
 }
-

@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('zap', {
   tabReload:   (a) => ipcRenderer.invoke('tab-reload', a),
   shellResize: (a) => ipcRenderer.invoke('shell-resize', a),
 
+  // Browser profiles
+  browserProfileActive: () => ipcRenderer.invoke('browser-profile-active'),
+  browserProfileList: () => ipcRenderer.invoke('browser-profile-list'),
+  browserProfileSetActive: (a) => ipcRenderer.invoke('browser-profile-set-active', a),
+
   // Privacy
   getPrivacy:       () => ipcRenderer.invoke('get-privacy'),
   setAdblock:       (a) => ipcRenderer.invoke('set-adblock', a),
