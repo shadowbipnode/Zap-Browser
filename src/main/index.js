@@ -2,6 +2,9 @@
 const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell, Notification } = require('electron')
 const portable = require('./portable')
 const path   = require('path')
+const fs     = require('fs')
+const os     = require('os')
+const crypto = require('crypto')
 const DB     = require('./db')
 const wallet = require('./wallet')
 const nostr  = require('./nostr')
@@ -94,6 +97,7 @@ let activeView  = null
 const tabViews  = new Map()
 const tabUrls   = new Map()
 const tabMeta   = new Map()
+const tabErrorPages = new Map()
 let activeTabId = null
 let navigationOwnerTabId = null
 let isSwitching = false
@@ -235,6 +239,116 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
+}
+
+function makeNavigationErrorHtml({ url, errorCode, errorDescription }) {
+  const safeUrl = escapeHtml(url || '')
+  const safeDescription = escapeHtml(errorDescription || 'Navigation failed')
+  const safeCode = escapeHtml(errorCode)
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Page unavailable</title>
+<style>
+  :root {
+    color-scheme: dark;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f1117;
+    color: #f4f4f5;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 15% 10%, rgba(245,166,35,.11), transparent 28rem),
+      #0f1117;
+  }
+  main {
+    width: min(680px, calc(100vw - 48px));
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 12px;
+    background: rgba(21,23,32,.92);
+    box-shadow: 0 24px 70px rgba(0,0,0,.45);
+    padding: 28px;
+  }
+  h1 { margin: 0 0 10px; font-size: 24px; line-height: 1.2; }
+  p { margin: 0 0 16px; color: #a1a1aa; line-height: 1.5; }
+  code {
+    display: block;
+    margin: 14px 0 18px;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+    background: rgba(255,255,255,.06);
+    color: #fbbf24;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    height: 34px;
+    border: 1px solid rgba(245,166,35,.55);
+    border-radius: 8px;
+    background: rgba(245,166,35,.16);
+    color: #fbbf24;
+    font-weight: 800;
+    cursor: pointer;
+    padding: 0 14px;
+  }
+  button.secondary {
+    border-color: rgba(255,255,255,.16);
+    background: rgba(255,255,255,.06);
+    color: #e4e4e7;
+  }
+</style>
+</head>
+<body>
+  <main>
+    <h1>This page could not be loaded</h1>
+    <p>The main frame failed before a page could render. You can retry, edit the address bar, or navigate somewhere else.</p>
+    <code>${safeDescription} (${safeCode})<br>${safeUrl}</code>
+    <div class="actions">
+      <button onclick="location.href=${escapeHtml(JSON.stringify(url || ''))}">Retry</button>
+      <button class="secondary" onclick="history.back()">Back</button>
+    </div>
+  </main>
+</body>
+</html>`
+}
+
+function isNavigationErrorPageUrl(url) {
+  return typeof url === 'string' && url.startsWith('data:text/html;charset=utf-8,')
+}
+
+function showNavigationErrorPage(view, tabId, url, errorCode, errorDescription) {
+  if (!view || view.webContents.isDestroyed() || !tabId || !url || isNavigationErrorPageUrl(url)) return
+
+  tabUrls.set(tabId, url)
+  tabErrorPages.set(tabId, {
+    url,
+    errorCode,
+    errorDescription,
+  })
+
+  sendTabUpdated(tabId, {
+    loading: false,
+    url,
+    title: errorDescription || 'Page unavailable',
+    canGoBack: view.webContents.canGoBack(),
+    canGoForward: view.webContents.canGoForward(),
+  })
+
+  if (navigationOwnerTabId === tabId) {
+    navigationOwnerTabId = null
+  }
+
+  const html = makeNavigationErrorHtml({ url, errorCode, errorDescription })
+  view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {})
 }
 
 function hideAddressSuggestions() {
@@ -827,9 +941,12 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
   view.webContents.on('did-navigate', async (_, url) => {
     const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
     if (!ownerTabId) return
+    tabErrorPages.delete(ownerTabId)
     tabUrls.set(ownerTabId, url)
     sendTabUpdated(ownerTabId, {
       url,
+      title: view.webContents.getTitle(),
+      loading: false,
       canGoBack: view.webContents.canGoBack(),
       canGoForward: view.webContents.canGoForward(),
     })
@@ -854,7 +971,9 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
     const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
     if (!ownerTabId) return
 
-    const url   = view.webContents.getURL()
+    const currentUrl = view.webContents.getURL()
+    const errorPage = tabErrorPages.get(ownerTabId)
+    const url   = errorPage && isNavigationErrorPageUrl(currentUrl) ? errorPage.url : currentUrl
     const title = view.webContents.getTitle()
 
     sendTabUpdated(ownerTabId, { loading: false, url, title })
@@ -863,6 +982,27 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
     if (!meta.private && url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
       DB.addHistory(url, title)
     }
+
+    if (navigationOwnerTabId === ownerTabId) {
+      navigationOwnerTabId = null
+    }
+  })
+
+  view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return
+
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+
+    const failedUrl = validatedURL || view.webContents.getURL() || ''
+
+    try {
+      sendTabUpdated(ownerTabId, {
+        loading: false,
+        url: failedUrl,
+        title: errorDescription ? `Navigation error: ${errorDescription}` : 'Navigation error',
+      })
+    } catch (_) {}
 
     if (navigationOwnerTabId === ownerTabId) {
       navigationOwnerTabId = null
@@ -1652,8 +1792,10 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
   if (!current || current === 'about:blank') {
     isSwitching = true
     navigationOwnerTabId = tabId
-    activeView.webContents.loadURL(url)
-      .catch(() => {})
+    view.webContents.loadURL(url)
+      .catch((err) => {
+        showNavigationErrorPage(view, tabId, url, err?.errno || 'LOAD_FAILED', err?.message || 'Navigation failed')
+      })
       .finally(() => { isSwitching = false })
   }
 
@@ -1679,6 +1821,7 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
 
   activeTabId = tabId
   navigationOwnerTabId = tabId
+  tabErrorPages.delete(tabId)
   tabUrls.set(tabId, u)
 
   if (activeView && activeView !== view) hideView(mainWindow, activeView)
@@ -1686,13 +1829,16 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   showView(mainWindow, activeView)
 
   await new Promise(r => setTimeout(r, 50))
-  activeView.webContents.loadURL(u).catch(() => {})
+  view.webContents.loadURL(u).catch((err) => {
+    showNavigationErrorPage(view, tabId, u, err?.errno || 'LOAD_FAILED', err?.message || 'Navigation failed')
+  })
 
   return { ok: true, url: u }
 })
 
 ipcMain.handle('tab-close', (_, { tabId }) => {
   tabUrls.delete(tabId)
+  tabErrorPages.delete(tabId)
   const meta = tabMeta.get(tabId) || {}
   tabMeta.delete(tabId)
 
@@ -1722,6 +1868,7 @@ ipcMain.handle('tab-close', (_, { tabId }) => {
 ipcMain.handle('tab-home', (_, { tabId }) => {
   activeTabId = tabId
   tabUrls.set(tabId, '')
+  tabErrorPages.delete(tabId)
 
   const view = tabViews.get(tabId)
   if (view) hideView(mainWindow, view)
@@ -1734,6 +1881,33 @@ ipcMain.handle('tab-home', (_, { tabId }) => {
 ipcMain.handle('tab-go-back',  () => activeView?.webContents.goBack())
 ipcMain.handle('tab-go-forward', () => activeView?.webContents.goForward())
 ipcMain.handle('tab-reload',   () => activeView?.webContents.reload())
+
+ipcMain.handle('tab-find', (_, { tabId, text, forward = true, findNext = false } = {}) => {
+  if (!tabId || tabId !== activeTabId) return { ok: false, error: 'Inactive tab' }
+  if (typeof text !== 'string' || text.length === 0 || text.length > 500) {
+    return { ok: false, error: 'Invalid search text' }
+  }
+
+  const view = tabViews.get(tabId)
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'Tab not available' }
+
+  view.webContents.findInPage(text, {
+    forward: !!forward,
+    findNext: !!findNext,
+  })
+
+  return { ok: true }
+})
+
+ipcMain.handle('tab-stop-find', (_, { tabId, action = 'clearSelection' } = {}) => {
+  if (!tabId || tabId !== activeTabId) return { ok: false, error: 'Inactive tab' }
+
+  const view = tabViews.get(tabId)
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'Tab not available' }
+
+  view.webContents.stopFindInPage(action)
+  return { ok: true }
+})
 
 ipcMain.handle('shell-resize', (_, args) => {
   if (!activeTabId || !tabUrls.get(activeTabId)) return
@@ -2161,6 +2335,414 @@ ipcMain.handle('decode-invoice',  (_, { bolt11 }) => {
   return nwc.decodeInvoice(bolt11)
 })
 
+function decodeBookmarkText(value) {
+  return String(value || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .trim()
+}
+
+function makeBookmarkSourceId(filePath) {
+  return crypto.createHash('sha256').update(filePath).digest('hex').slice(0, 16)
+}
+
+function pathExists(filePath) {
+  try {
+    return !!filePath && fs.existsSync(filePath)
+  } catch (_) {
+    return false
+  }
+}
+
+function readJsonFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+}
+
+function normalizeBookmarkUrl(url) {
+  const value = String(url || '').trim()
+  if (!/^https?:\/\//i.test(value)) return ''
+  return value
+}
+
+function parseChromeBookmarkNode(node) {
+  if (!node || typeof node !== 'object') return null
+
+  if (node.type === 'url') {
+    const url = normalizeBookmarkUrl(node.url)
+    if (!url) return null
+    return {
+      type: 'bookmark',
+      title: String(node.name || url).trim() || url,
+      url,
+    }
+  }
+
+  if (node.type === 'folder') {
+    const children = Array.isArray(node.children)
+      ? node.children.map(parseChromeBookmarkNode).filter(Boolean)
+      : []
+
+    if (!children.length && !String(node.name || '').trim()) return null
+
+    return {
+      type: 'folder',
+      title: String(node.name || 'Folder').trim() || 'Folder',
+      children,
+    }
+  }
+
+  return null
+}
+
+function parseChromeBookmarksFile(filePath) {
+  const data = readJsonFile(filePath)
+  const roots = data?.roots || {}
+  const nodes = []
+
+  for (const key of ['bookmark_bar', 'other', 'synced']) {
+    const parsed = parseChromeBookmarkNode(roots[key])
+    if (parsed) nodes.push(parsed)
+  }
+
+  return nodes
+}
+
+function parseFirefoxBookmarksFile(filePath) {
+  const Database = require('better-sqlite3')
+  const tmpPath = path.join(os.tmpdir(), `zap-firefox-bookmarks-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`)
+
+  try {
+    fs.copyFileSync(filePath, tmpPath)
+    const places = new Database(tmpPath, { readonly: true, fileMustExist: true })
+
+    try {
+      const rows = places.prepare(`
+        SELECT
+          b.id,
+          b.parent,
+          b.type,
+          COALESCE(NULLIF(b.title, ''), p.title, p.url, 'Folder') AS title,
+          b.position,
+          p.url
+        FROM moz_bookmarks b
+        LEFT JOIN moz_places p ON p.id=b.fk
+        WHERE b.type IN (1, 2)
+        ORDER BY b.parent ASC, b.position ASC, b.id ASC
+      `).all()
+
+      const byParent = new Map()
+      const byId = new Map()
+
+      for (const row of rows) {
+        byId.set(row.id, row)
+        const key = row.parent == null ? 'root' : String(row.parent)
+        if (!byParent.has(key)) byParent.set(key, [])
+        byParent.get(key).push(row)
+      }
+
+      const toNode = (row) => {
+        if (Number(row.type) === 1) {
+          const url = normalizeBookmarkUrl(row.url)
+          if (!url) return null
+          return {
+            type: 'bookmark',
+            title: String(row.title || url).trim() || url,
+            url,
+          }
+        }
+
+        const children = (byParent.get(String(row.id)) || [])
+          .map(toNode)
+          .filter(Boolean)
+
+        if (!children.length) return null
+
+        return {
+          type: 'folder',
+          title: String(row.title || 'Folder').trim() || 'Folder',
+          children,
+        }
+      }
+
+      const rootChildren = (byParent.get('1') || [])
+        .filter(row => Number(row.type) === 2)
+        .map(toNode)
+        .filter(Boolean)
+
+      if (rootChildren.length) return rootChildren
+
+      return rows
+        .filter(row => Number(row.type) === 2 && !byId.has(row.parent))
+        .map(toNode)
+        .filter(Boolean)
+    } finally {
+      places.close()
+    }
+  } finally {
+    try { fs.unlinkSync(tmpPath) } catch (_) {}
+  }
+}
+
+function parseBookmarksHtml(html) {
+  const root = []
+  const stack = [{ children: root }]
+  const tokenRe = /<DT>\s*<H3[^>]*>(.*?)<\/H3>|<\/DL\s*>|<DT>\s*<A[^>]+HREF=(["'])(.*?)\2[^>]*>(.*?)<\/A>/gis
+
+  let match
+  while ((match = tokenRe.exec(html)) !== null) {
+    const folderTitle = decodeBookmarkText(match[1])
+    const url = normalizeBookmarkUrl(match[3])
+    const title = decodeBookmarkText(match[4])
+
+    if (folderTitle) {
+      const folder = {
+        type: 'folder',
+        title: folderTitle,
+        children: [],
+      }
+      stack[stack.length - 1].children.push(folder)
+      stack.push(folder)
+      continue
+    }
+
+    if (match[0].toUpperCase().startsWith('</DL')) {
+      if (stack.length > 1) stack.pop()
+      continue
+    }
+
+    if (url) {
+      stack[stack.length - 1].children.push({
+        type: 'bookmark',
+        title: title || url,
+        url,
+      })
+    }
+  }
+
+  return root
+}
+
+function importBookmarkNodes(nodes, options = {}) {
+  const favorites = DB.getFavorites()
+  const existingUrls = new Set(
+    favorites
+      .filter(item => Number(item.is_folder) !== 1 && item.url)
+      .map(item => String(item.url).trim().toLowerCase())
+  )
+  const folderByParentAndTitle = new Map()
+
+  for (const item of favorites) {
+    if (Number(item.is_folder) !== 1) continue
+    const key = `${item.parent_id ?? 'root'}:${String(item.title || '').trim().toLowerCase()}`
+    if (!folderByParentAndTitle.has(key)) folderByParentAndTitle.set(key, item.id)
+  }
+
+  let importedBookmarks = 0
+  let importedFolders = 0
+  let skippedDuplicates = 0
+  let sortOrder = Date.now()
+
+  const ensureFolder = (title, parentId) => {
+    const safeTitle = String(title || 'Folder').trim() || 'Folder'
+    const key = `${parentId ?? 'root'}:${safeTitle.toLowerCase()}`
+    const existing = folderByParentAndTitle.get(key)
+    if (existing) return existing
+
+    const folder = DB.addFavorite({
+      title: safeTitle,
+      url: '',
+      favicon: null,
+      parent_id: parentId,
+      is_folder: 1,
+      sort_order: sortOrder++,
+    })
+
+    folderByParentAndTitle.set(key, folder.id)
+    importedFolders++
+    return folder.id
+  }
+
+  const rootParent = options.rootTitle
+    ? ensureFolder(options.rootTitle, null)
+    : null
+
+  const walk = (items, parentId) => {
+    for (const item of items || []) {
+      if (!item) continue
+
+      if (item.type === 'folder') {
+        const folderId = ensureFolder(item.title, parentId)
+        walk(item.children || [], folderId)
+        continue
+      }
+
+      if (item.type !== 'bookmark') continue
+
+      const url = normalizeBookmarkUrl(item.url)
+      if (!url) continue
+
+      const key = url.toLowerCase()
+      if (existingUrls.has(key)) {
+        skippedDuplicates++
+        continue
+      }
+
+      DB.addFavorite({
+        title: String(item.title || url).trim() || url,
+        url,
+        favicon: null,
+        parent_id: parentId,
+        is_folder: 0,
+        sort_order: sortOrder++,
+      })
+
+      existingUrls.add(key)
+      importedBookmarks++
+    }
+  }
+
+  walk(nodes, rootParent)
+
+  return {
+    ok: true,
+    importedBookmarks,
+    importedFolders,
+    skippedDuplicates,
+  }
+}
+
+function chromiumProfileDirs(userDataDir) {
+  if (!pathExists(userDataDir)) return []
+
+  let entries = []
+  try {
+    entries = fs.readdirSync(userDataDir, { withFileTypes: true })
+  } catch (_) {
+    return []
+  }
+
+  return entries
+    .filter(entry => entry.isDirectory() && (entry.name === 'Default' || /^Profile \d+$/i.test(entry.name)))
+    .map(entry => ({
+      profileName: entry.name,
+      filePath: path.join(userDataDir, entry.name, 'Bookmarks'),
+    }))
+    .filter(item => pathExists(item.filePath))
+}
+
+function readFirefoxProfiles(baseDir) {
+  const iniPath = path.join(baseDir, 'profiles.ini')
+  if (!pathExists(iniPath)) return []
+
+  let ini = ''
+  try {
+    ini = fs.readFileSync(iniPath, 'utf8')
+  } catch (_) {
+    return []
+  }
+
+  const sections = ini.split(/\n\s*\n/g)
+  const profiles = []
+
+  for (const section of sections) {
+    if (!/^\s*\[Profile\d+\]/m.test(section)) continue
+
+    const get = (key) => section.match(new RegExp(`^${key}=(.*)$`, 'mi'))?.[1]?.trim()
+    const profilePath = get('Path')
+    if (!profilePath) continue
+
+    const isRelative = get('IsRelative') !== '0'
+    const name = get('Name') || path.basename(profilePath)
+    const dir = isRelative ? path.join(baseDir, profilePath) : profilePath
+    const filePath = path.join(dir, 'places.sqlite')
+
+    if (pathExists(filePath)) {
+      profiles.push({ profileName: name, filePath })
+    }
+  }
+
+  return profiles
+}
+
+function detectBookmarkSources() {
+  const home = os.homedir()
+  const platform = process.platform
+  const sources = []
+  const addSource = (source) => {
+    sources.push({
+      id: makeBookmarkSourceId(source.filePath),
+      ...source,
+    })
+  }
+
+  const chromiumBases = []
+
+  if (platform === 'linux') {
+    const config = process.env.XDG_CONFIG_HOME || path.join(home, '.config')
+    chromiumBases.push(
+      { browser: 'Chrome', base: path.join(config, 'google-chrome') },
+      { browser: 'Chromium', base: path.join(config, 'chromium') },
+      { browser: 'Brave', base: path.join(config, 'BraveSoftware', 'Brave-Browser') },
+      { browser: 'Edge', base: path.join(config, 'microsoft-edge') },
+      { browser: 'Vivaldi', base: path.join(config, 'vivaldi') }
+    )
+  }
+
+  if (platform === 'win32') {
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
+    chromiumBases.push(
+      { browser: 'Chrome', base: path.join(local, 'Google', 'Chrome', 'User Data') },
+      { browser: 'Chromium', base: path.join(local, 'Chromium', 'User Data') },
+      { browser: 'Brave', base: path.join(local, 'BraveSoftware', 'Brave-Browser', 'User Data') },
+      { browser: 'Edge', base: path.join(local, 'Microsoft', 'Edge', 'User Data') },
+      { browser: 'Vivaldi', base: path.join(local, 'Vivaldi', 'User Data') }
+    )
+  }
+
+  for (const item of chromiumBases) {
+    for (const profile of chromiumProfileDirs(item.base)) {
+      addSource({
+        type: 'chromium',
+        browser: item.browser,
+        profile: profile.profileName,
+        label: `${item.browser} (${profile.profileName})`,
+        filePath: profile.filePath,
+      })
+    }
+  }
+
+  const firefoxBases = []
+  if (platform === 'linux') firefoxBases.push(path.join(home, '.mozilla', 'firefox'))
+  if (platform === 'win32') {
+    const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming')
+    firefoxBases.push(path.join(roaming, 'Mozilla', 'Firefox'))
+  }
+
+  for (const base of firefoxBases) {
+    for (const profile of readFirefoxProfiles(base)) {
+      addSource({
+        type: 'firefox',
+        browser: 'Firefox',
+        profile: profile.profileName,
+        label: `Firefox (${profile.profileName})`,
+        filePath: profile.filePath,
+      })
+    }
+  }
+
+  return sources
+}
+
+function loadBookmarkSource(source) {
+  if (source.type === 'chromium') return parseChromeBookmarksFile(source.filePath)
+  if (source.type === 'firefox') return parseFirefoxBookmarksFile(source.filePath)
+  throw new Error('Unsupported source')
+}
+
 // ── IPC: favorites ────────────────────────────────────────────────────────────
 ipcMain.handle('get-favorites',   () => DB.getFavorites())
 ipcMain.handle('add-favorite',    (_, args) => {
@@ -2244,58 +2826,44 @@ ipcMain.handle('export-favorites-html', () => {
 ipcMain.handle('import-favorites-html', (_, { html }) => {
   V.assert(typeof html === 'string' && html.length <= 10_000_000, 'Invalid bookmarks HTML')
 
-  const results = []
-  const stack = [null]
-  let sortOrder = 0
+  return importBookmarkNodes(parseBookmarksHtml(html))
+})
 
-  const tokenRe = /<DT>\s*<H3[^>]*>(.*?)<\/H3>|<DL><p>|<\/DL><p>|<DT>\s*<A[^>]+HREF="([^"]+)"[^>]*>(.*?)<\/A>/gis
+ipcMain.handle('detect-bookmark-import-sources', () => {
+  return detectBookmarkSources().map(({ filePath, ...source }) => source)
+})
 
-  let match
-  while ((match = tokenRe.exec(html)) !== null) {
-    const folderTitle = match[1]?.replace(/<[^>]+>/g, '').trim()
-    const url = match[2]?.trim()
-    const title = match[3]?.replace(/<[^>]+>/g, '').trim()
+ipcMain.handle('import-bookmarks-from-browser', (_, { sourceId }) => {
+  V.assert(typeof sourceId === 'string' && /^[0-9a-f]{16}$/.test(sourceId), 'Invalid bookmark source')
 
-    if (folderTitle) {
-      try {
-        const parentId = stack[stack.length - 1]
-        const folder = DB.addFavorite({
-          title: folderTitle,
-          url: '',
-          favicon: null,
-          parent_id: parentId,
-          is_folder: 1,
-          sort_order: sortOrder++,
-        })
+  const source = detectBookmarkSources().find(item => item.id === sourceId)
+  if (!source) return { ok: false, error: 'Bookmark source not available' }
 
-        stack.push(folder.id)
-        results.push({ type: 'folder', title: folderTitle })
-      } catch (_) {}
-      continue
+  try {
+    const nodes = loadBookmarkSource(source)
+    return {
+      ...importBookmarkNodes(nodes, {
+        rootTitle: `${source.browser} ${source.profile || 'Bookmarks'}`.trim(),
+      }),
+      source: {
+        id: source.id,
+        label: source.label,
+        browser: source.browser,
+        profile: source.profile,
+      },
     }
-
-    if (match[0].toUpperCase().startsWith('</DL')) {
-      if (stack.length > 1) stack.pop()
-      continue
-    }
-
-    if (url && title && /^https?:\/\//i.test(url)) {
-      try {
-        DB.addFavorite({
-          title,
-          url,
-          favicon: null,
-          parent_id: stack[stack.length - 1],
-          is_folder: 0,
-          sort_order: sortOrder++,
-        })
-
-        results.push({ type: 'bookmark', url, title })
-      } catch (_) {}
+  } catch (err) {
+    return {
+      ok: false,
+      error: err?.message || 'Bookmark import failed',
+      source: {
+        id: source.id,
+        label: source.label,
+        browser: source.browser,
+        profile: source.profile,
+      },
     }
   }
-
-  return results
 })
 
 // ── IPC: cashu ────────────────────────────────────────────────────────────────
