@@ -40,7 +40,12 @@ function signEv(event, privKey) {
   throw new Error('No signing function available in nostr-tools')
 }
 
-async function createProfile(DB, { seedHex, name, about }) {
+function resolveBrowserProfileId(DB, browserProfileId) {
+  return browserProfileId || DB.getActiveBrowserProfileId()
+}
+
+async function createProfile(DB, { seedHex, name, about }, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   const privKeyHex = deriveNostrKey(seedHex)
   const pubKeyHex  = getPublicKey(privKeyHex)
   const npub       = nip19.npubEncode(pubKeyHex)
@@ -51,23 +56,24 @@ async function createProfile(DB, { seedHex, name, about }) {
   const now = Math.floor(Date.now() / 1000)
   const db = DB._db()
 
-  db.prepare('UPDATE nostr_profile SET active=0').run()
+  db.prepare('UPDATE nostr_profile SET active=0 WHERE browser_profile_id=?').run(targetBrowserProfileId)
 
   db.prepare(`INSERT INTO nostr_profile
-      (pubkey, npub, encrypted_nsec, name, about, active, created_at, last_used_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(pubkey) DO UPDATE SET
+      (browser_profile_id, pubkey, npub, encrypted_nsec, name, about, active, created_at, last_used_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(browser_profile_id, pubkey) DO UPDATE SET
         encrypted_nsec=excluded.encrypted_nsec,
         name=excluded.name,
         about=excluded.about,
         active=1,
         last_used_at=excluded.last_used_at`)
-    .run(pubKeyHex, npub, encryptedNsec, name || null, about || null, now, now)
+    .run(targetBrowserProfileId, pubKeyHex, npub, encryptedNsec, name || null, about || null, now, now)
 
   return { pubkey: pubKeyHex, npub, name, about }
 }
 
-async function importNsec(DB, { nsec, name }) {
+async function importNsec(DB, { nsec, name }, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   let privKeyHex
   try {
     const decoded = nip19.decode(nsec.trim())
@@ -85,40 +91,42 @@ async function importNsec(DB, { nsec, name }) {
   const now = Math.floor(Date.now() / 1000)
   const db = DB._db()
 
-  db.prepare('UPDATE nostr_profile SET active=0').run()
+  db.prepare('UPDATE nostr_profile SET active=0 WHERE browser_profile_id=?').run(targetBrowserProfileId)
 
   db.prepare(`INSERT INTO nostr_profile
-      (pubkey, npub, encrypted_nsec, name, active, created_at, last_used_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(pubkey) DO UPDATE SET
+      (browser_profile_id, pubkey, npub, encrypted_nsec, name, active, created_at, last_used_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(browser_profile_id, pubkey) DO UPDATE SET
         encrypted_nsec=excluded.encrypted_nsec,
         name=excluded.name,
         active=1,
         last_used_at=excluded.last_used_at`)
-    .run(pubKeyHex, npub, encryptedNsec, name || null, now, now)
+    .run(targetBrowserProfileId, pubKeyHex, npub, encryptedNsec, name || null, now, now)
 
   return { pubkey: pubKeyHex, npub, name }
 }
 
-function getProfile(DB) {
+function getProfile(DB, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   return DB._db()
-    .prepare('SELECT id, pubkey, npub, name, about, picture, nip05, active, last_used_at FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
-    .get() || null
+    .prepare('SELECT id, browser_profile_id, pubkey, npub, name, about, picture, nip05, active, last_used_at FROM nostr_profile WHERE browser_profile_id=? AND active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get(targetBrowserProfileId) || null
 }
 
-function getPubkey(DB) {
-  const p = getProfile(DB)
+function getPubkey(DB, browserProfileId = null) {
+  const p = getProfile(DB, browserProfileId)
   return p ? p.pubkey : null
 }
 
-async function signEvent(DB, event) {
+async function signEvent(DB, event, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   if (Number(event?.kind) === 0) {
     throw new Error('Zap Browser does not sign Nostr metadata updates')
   }
 
   const row = DB._db()
-    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
-    .get()
+    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE browser_profile_id=? AND active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get(targetBrowserProfileId)
 
   if (!row) throw new Error('No Nostr profile configured')
 
@@ -145,51 +153,56 @@ function getRelays() {
     'wss://nostr.wine':          { read: true,  write: false },
   }
 }
-function listProfiles(DB) {
+function listProfiles(DB, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   return DB._db()
     .prepare(`
-      SELECT id, pubkey, npub, name, about, picture, nip05, active, last_used_at, created_at
+      SELECT id, browser_profile_id, pubkey, npub, name, about, picture, nip05, active, last_used_at, created_at
       FROM nostr_profile
+      WHERE browser_profile_id=?
       ORDER BY active DESC, last_used_at DESC, id DESC
     `)
-    .all()
+    .all(targetBrowserProfileId)
 }
 
-function setActiveProfile(DB, id) {
+function setActiveProfile(DB, id, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   const db = DB._db()
-  const row = db.prepare('SELECT id FROM nostr_profile WHERE id=?').get(Number(id))
+  const row = db.prepare('SELECT id FROM nostr_profile WHERE id=? AND browser_profile_id=?').get(Number(id), targetBrowserProfileId)
   if (!row) throw new Error('Nostr profile not found')
 
   const now = Math.floor(Date.now() / 1000)
 
-  db.prepare('UPDATE nostr_profile SET active=0').run()
-  db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?').run(now, Number(id))
+  db.prepare('UPDATE nostr_profile SET active=0 WHERE browser_profile_id=?').run(targetBrowserProfileId)
+  db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=? AND browser_profile_id=?').run(now, Number(id), targetBrowserProfileId)
 
-  return getProfile(DB)
+  return getProfile(DB, targetBrowserProfileId)
 }
 
-function removeProfileById(DB, id) {
+function removeProfileById(DB, id, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   const db = DB._db()
-  const row = db.prepare('SELECT id, active FROM nostr_profile WHERE id=?').get(Number(id))
+  const row = db.prepare('SELECT id, active FROM nostr_profile WHERE id=? AND browser_profile_id=?').get(Number(id), targetBrowserProfileId)
   if (!row) throw new Error('Nostr profile not found')
 
-  db.prepare('DELETE FROM nostr_profile WHERE id=?').run(Number(id))
+  db.prepare('DELETE FROM nostr_profile WHERE id=? AND browser_profile_id=?').run(Number(id), targetBrowserProfileId)
 
   if (Number(row.active) === 1) {
-    const next = db.prepare('SELECT id FROM nostr_profile ORDER BY last_used_at DESC, id DESC LIMIT 1').get()
+    const next = db.prepare('SELECT id FROM nostr_profile WHERE browser_profile_id=? ORDER BY last_used_at DESC, id DESC LIMIT 1').get(targetBrowserProfileId)
     if (next) {
-      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?')
-        .run(Math.floor(Date.now() / 1000), next.id)
+      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=? AND browser_profile_id=?')
+        .run(Math.floor(Date.now() / 1000), next.id, targetBrowserProfileId)
     }
   }
 
   return { ok: true }
 }
 
-function removeProfile(DB) {
+function removeProfile(DB, browserProfileId = null) {
+  const targetBrowserProfileId = resolveBrowserProfileId(DB, browserProfileId)
   DB._db()
-    .prepare('DELETE FROM nostr_profile WHERE active=1')
-    .run()
+    .prepare('DELETE FROM nostr_profile WHERE browser_profile_id=? AND active=1')
+    .run(targetBrowserProfileId)
 
   DB.setSetting('nostr_skipped', '0')
 

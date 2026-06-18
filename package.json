@@ -6,6 +6,7 @@
   "scripts": {
     "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:3000 && electron .\"",
     "dev:renderer": "vite --config src/renderer/vite.config.ts",
+    "test": "node test/run.js",
     "build": "vite build --config src/renderer/vite.config.ts && electron-builder",
     "pack": "electron-builder --dir",
     "postinstall": "electron-builder install-app-deps"

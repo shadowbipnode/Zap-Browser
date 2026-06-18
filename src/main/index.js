@@ -27,6 +27,7 @@ const {
 const {
   setupWebViewContextMenu,
 } = require('./ui/nativeMenus')
+const profileContext = require('./browser/profileContext')
 
 const {
   showBookmarkContextMenu,
@@ -175,10 +176,6 @@ const UA_POOL = [
 let currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
 const nostrSessionPermissions = new Map()
 
-function safePartitionId(value) {
-  return String(value || 'default').replace(/[^a-zA-Z0-9_-]/g, '-')
-}
-
 function getActiveBrowserProfile() {
   return DB.getActiveBrowserProfile() || { id: 'default', name: 'Default', is_default: 1 }
 }
@@ -189,15 +186,11 @@ function getBrowserProfileForTab(tabId) {
 }
 
 function getProfileSession(profile) {
-  if (!profile || profile.id === 'default') {
-    return session.defaultSession
-  }
-
-  return session.fromPartition(`persist:zap-profile-${safePartitionId(profile.id)}`)
+  return profileContext.getPersistentSession(session, profile?.id)
 }
 
 function getPrivateSession(profile, tabId) {
-  return session.fromPartition(`zap-private-${safePartitionId(profile?.id)}-${safePartitionId(tabId)}`)
+  return profileContext.getPrivateSession(session, profile?.id, tabId)
 }
 
 function setUserAgentForSession(ses) {
@@ -561,6 +554,43 @@ function getIpcBrowserProfileId(ipcEvent) {
   }
 
   return getActiveBrowserProfile().id
+}
+
+async function disposeTab(tabId) {
+  tabUrls.delete(tabId)
+  tabErrorPages.delete(tabId)
+  lastTabUpdates.delete(tabId)
+
+  const meta = tabMeta.get(tabId) || {}
+  tabMeta.delete(tabId)
+
+  const view = tabViews.get(tabId)
+  if (view) {
+    try { hideView(mainWindow, view) } catch (_) {}
+
+    if (meta.private) {
+      try { await profileContext.clearSessionStorage(view.webContents.session) } catch (_) {}
+    }
+
+    try { webContentsProfileIds.delete(view.webContents.id) } catch (_) {}
+    try { view.webContents.destroy() } catch (_) {}
+    tabViews.delete(tabId)
+  }
+
+  if (activeTabId === tabId) {
+    activeView = null
+    activeTabId = null
+  }
+}
+
+async function disposeAllTabs() {
+  for (const tabId of [...new Set([...tabMeta.keys(), ...tabViews.keys(), ...tabUrls.keys()])]) {
+    await disposeTab(tabId)
+  }
+
+  activeView = null
+  activeTabId = null
+  navigationOwnerTabId = null
 }
 
 function summarizeNostrEvent(event) {
@@ -1741,9 +1771,33 @@ ipcMain.handle('browser-profile-rename', (_, { id, name }) => {
   V.assert(typeof name === 'string' && name.trim().length > 0 && name.length <= 120, 'Invalid profile name')
   return DB.renameBrowserProfile(id, name.trim())
 })
-ipcMain.handle('browser-profile-set-active', (_, { id }) => {
+ipcMain.handle('browser-profile-set-active', async (_, { id }) => {
   V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
-  return DB.setActiveBrowserProfile(id)
+  const current = getActiveBrowserProfile()
+
+  if (current.id === id) {
+    return { ok: true, changed: false, profile: current }
+  }
+
+  await disposeAllTabs()
+  const profile = DB.setActiveBrowserProfile(id)
+
+  return { ok: true, changed: true, profile }
+})
+ipcMain.handle('browser-profile-delete', async (_, { id }) => {
+  V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
+  const profile = DB.getBrowserProfileById(id)
+  V.assert(profile, 'Browser profile not found')
+  V.assert(Number(profile.is_default) !== 1, 'The default profile cannot be deleted')
+
+  if (getActiveBrowserProfile().id === profile.id) {
+    await disposeAllTabs()
+  }
+
+  const profileSession = getProfileSession(profile)
+  try { await profileContext.clearSessionStorage(profileSession) } catch (_) {}
+
+  return DB.deleteBrowserProfile(profile.id)
 })
 
 // ── IPC: tabs ─────────────────────────────────────────────────────────────────
@@ -1836,32 +1890,8 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   return { ok: true, url: u }
 })
 
-ipcMain.handle('tab-close', (_, { tabId }) => {
-  tabUrls.delete(tabId)
-  tabErrorPages.delete(tabId)
-  const meta = tabMeta.get(tabId) || {}
-  tabMeta.delete(tabId)
-
-  const view = tabViews.get(tabId)
-  if (view) {
-    try { hideView(mainWindow, view) } catch (_) {}
-    try {
-      if (meta.private) {
-        view.webContents.session.clearStorageData().catch(() => {})
-        view.webContents.session.clearCache().catch(() => {})
-      }
-    } catch (_) {}
-
-    try { webContentsProfileIds.delete(view.webContents.id) } catch (_) {}
-    try { view.webContents.destroy() } catch (_) {}
-    tabViews.delete(tabId)
-  }
-
-  if (activeTabId === tabId) {
-    activeView = null
-    activeTabId = null
-  }
-
+ipcMain.handle('tab-close', async (_, { tabId }) => {
+  await disposeTab(tabId)
   return { ok: true }
 })
 
@@ -2156,7 +2186,7 @@ ipcMain.handle('nostr-create-profile', (_, args) => {
   if (args.name != null) {
     V.assert(typeof args.name === 'string' && args.name.length <= 120, 'Invalid name')
   }
-  return nostr.createProfile(DB, args)
+  return nostr.createProfile(DB, args, getActiveBrowserProfile().id)
 })
 ipcMain.handle('nostr-import-nsec',    (_, args) => {
   V.validateNsec(args?.nsec)
@@ -2165,20 +2195,20 @@ ipcMain.handle('nostr-import-nsec',    (_, args) => {
     V.assert(typeof args.name === 'string' && args.name.length <= 120, 'Invalid name')
   }
 
-  return nostr.importNsec(DB, args)
+  return nostr.importNsec(DB, args, getActiveBrowserProfile().id)
 })
 ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1'))
-ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
-ipcMain.handle('nostr-list-profiles',  () => nostr.listProfiles(DB))
+ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB, getActiveBrowserProfile().id))
+ipcMain.handle('nostr-list-profiles',  () => nostr.listProfiles(DB, getActiveBrowserProfile().id))
 ipcMain.handle('nostr-set-active-profile', (_, { id }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
-  return nostr.setActiveProfile(DB, Number(id))
+  return nostr.setActiveProfile(DB, Number(id), getActiveBrowserProfile().id)
 })
 ipcMain.handle('nostr-remove-profile-by-id', (_, { id }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
-  return nostr.removeProfileById(DB, Number(id))
+  return nostr.removeProfileById(DB, Number(id), getActiveBrowserProfile().id)
 })
-ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
+ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB, getActiveBrowserProfile().id))
 ipcMain.handle('nostr-list-permissions', () => DB.listNostrPermissions())
 ipcMain.handle('nostr-clear-permissions', () => DB.clearNostrPermissions())
 ipcMain.handle('nostr-remove-permission', (_, { origin, action }) => {
@@ -2189,9 +2219,9 @@ ipcMain.handle('nostr-remove-permission', (_, { origin, action }) => {
 ipcMain.handle('nostr-get-relays',     () => nostr.getRelays())
 ipcMain.handle('nostr-sign-event',     (_, { event }) => {
   V.validateNostrEvent(event)
-  return nostr.signEvent(DB, event)
+  return nostr.signEvent(DB, event, getActiveBrowserProfile().id)
 })
-ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB))
+ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB, getActiveBrowserProfile().id))
 // NIP-07 aliases — same implementation, separate IPC channels for clarity
 ipcMain.handle('nostr-get-pubkey-nip07', async (ipcEvent) => {
   const allowed = await confirmNostrPermission(ipcEvent, 'getPublicKey', null)
@@ -2200,7 +2230,7 @@ ipcMain.handle('nostr-get-pubkey-nip07', async (ipcEvent) => {
     throw new Error('Nostr public key request denied by user')
   }
 
-  return nostr.getPubkey(DB)
+  return nostr.getPubkey(DB, getIpcBrowserProfileId(ipcEvent))
 })
 ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
   V.validateNostrEvent(e)
@@ -2211,7 +2241,7 @@ ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
     throw new Error('Nostr signing request denied by user')
   }
 
-  return nostr.signEvent(DB, e)
+  return nostr.signEvent(DB, e, getIpcBrowserProfileId(ipcEvent))
 })
 ipcMain.handle('nostr-get-relays-nip07',  () => nostr.getRelays())
 ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
@@ -2239,9 +2269,10 @@ ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
 
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
+  const browserProfileId = getIpcBrowserProfileId(ipcEvent)
   const row = DB._db()
-    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
-    .get()
+    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE browser_profile_id=? AND active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get(browserProfileId)
 
   if (!row) throw new Error('No Nostr profile found')
 
@@ -2275,9 +2306,10 @@ ipcMain.handle('nostr-nip04-decrypt', async (ipcEvent, { pubkey, text }) => {
 
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
+  const browserProfileId = getIpcBrowserProfileId(ipcEvent)
   const row = DB._db()
-    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
-    .get()
+    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE browser_profile_id=? AND active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get(browserProfileId)
 
   if (!row) throw new Error('No Nostr profile found')
 
@@ -2953,18 +2985,15 @@ ipcMain.handle('get-history',   (_, { limit } = {}) => {
 })
 ipcMain.handle('clear-history', () => DB.clearHistory())
 ipcMain.handle('clear-cookies', async () => {
-  const storages = ['cookies', 'localstorage', 'sessionstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage']
-
-  for (const ses of configuredSessions) {
-    await ses.clearStorageData({ storages })
-  }
+  const activeSession = configureBrowserSession(getProfileSession(getActiveBrowserProfile()))
+  await activeSession.clearStorageData({ storages: profileContext.PROFILE_STORAGE_TYPES })
+  await activeSession.flushStorageData()
 
   return { ok: true }
 })
 ipcMain.handle('clear-cache', async () => {
-  for (const ses of configuredSessions) {
-    await ses.clearCache()
-  }
+  const activeSession = configureBrowserSession(getProfileSession(getActiveBrowserProfile()))
+  await activeSession.clearCache()
 
   return { ok: true }
 })

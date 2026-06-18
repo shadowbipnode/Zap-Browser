@@ -148,33 +148,6 @@ function init() {
   try { db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
   try { db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
 
-  // Nostr multi-profile migration
-  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN active INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
-  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN last_used_at INTEGER').run() } catch (_) {}
-  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_pubkey ON nostr_profile(pubkey)').run() } catch (_) {}
-
-  // NIP-07 permissions per active Nostr profile
-  try { db.prepare('ALTER TABLE nostr_permissions ADD COLUMN profile_id INTEGER').run() } catch (_) {}
-  try {
-    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
-    if (active) {
-      db.prepare('UPDATE nostr_permissions SET profile_id=? WHERE profile_id IS NULL').run(active.id)
-    }
-  } catch (_) {}
-  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_permissions_profile_origin_action ON nostr_permissions(profile_id, origin, action)').run() } catch (_) {}
-
-
-  try {
-    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
-    const first = db.prepare('SELECT id FROM nostr_profile ORDER BY id ASC LIMIT 1').get()
-
-    if (!active && first) {
-      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?')
-        .run(Math.floor(Date.now() / 1000), first.id)
-    }
-  } catch (_) {}
-
-
   // Legacy bookmarks migration:
   // Older Zap Browser versions stored bookmarks directly at root without a
   // dedicated bookmarks bar folder. Create the root folder and move legacy
@@ -204,6 +177,7 @@ function init() {
 migrateNwcConnectionsSchema()
 migratePrivacySettingsSchema()
 migrateBrowserProfiles()
+migrateNostrProfilesSchema()
 migrateNostrPermissionsSchema()
 }
 
@@ -290,6 +264,76 @@ function migrateNostrPermissionsSchema() {
       ON nostr_permissions(browser_profile_id, origin, action)
     `)
   })()
+}
+
+function migrateNostrProfilesSchema() {
+  const columns = db
+    .prepare('PRAGMA table_info(nostr_profile)')
+    .all()
+    .map(c => c.name)
+
+  if (!columns.includes('active')) {
+    db.prepare('ALTER TABLE nostr_profile ADD COLUMN active INTEGER NOT NULL DEFAULT 0').run()
+  }
+
+  if (!columns.includes('last_used_at')) {
+    db.prepare('ALTER TABLE nostr_profile ADD COLUMN last_used_at INTEGER').run()
+  }
+
+  if (!columns.includes('browser_profile_id')) {
+    db.prepare("ALTER TABLE nostr_profile ADD COLUMN browser_profile_id TEXT NOT NULL DEFAULT 'default'").run()
+  }
+
+  db.prepare("UPDATE nostr_profile SET browser_profile_id='default' WHERE browser_profile_id IS NULL OR browser_profile_id=''").run()
+  db.exec(`
+    UPDATE nostr_profile
+    SET active=0
+    WHERE active=1
+      AND id NOT IN (
+        SELECT MAX(id)
+        FROM nostr_profile
+        WHERE active=1
+        GROUP BY browser_profile_id
+      )
+  `)
+  db.exec('DROP INDEX IF EXISTS idx_nostr_profile_pubkey')
+  db.exec('DROP INDEX IF EXISTS idx_nostr_profile_active_browser_profile')
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_browser_profile_pubkey
+    ON nostr_profile(browser_profile_id, pubkey)
+  `)
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_active_browser_profile
+    ON nostr_profile(browser_profile_id)
+    WHERE active=1
+  `)
+
+  const ts = now()
+  const browserProfiles = db.prepare('SELECT id FROM browser_profiles').all()
+
+  for (const browserProfile of browserProfiles) {
+    const active = db.prepare(`
+      SELECT id
+      FROM nostr_profile
+      WHERE browser_profile_id=? AND active=1
+      ORDER BY last_used_at DESC, id DESC
+      LIMIT 1
+    `).get(browserProfile.id)
+
+    if (active) continue
+
+    const first = db.prepare(`
+      SELECT id
+      FROM nostr_profile
+      WHERE browser_profile_id=?
+      ORDER BY last_used_at DESC, id DESC
+      LIMIT 1
+    `).get(browserProfile.id)
+
+    if (first) {
+      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?').run(ts, first.id)
+    }
+  }
 }
 function migrateNwcConnectionsSchema() {
   const columns = db
@@ -389,6 +433,35 @@ function setActiveBrowserProfile(id) {
 
 function getBrowserProfileById(id) {
   return db.prepare('SELECT * FROM browser_profiles WHERE id=?').get(String(id || '')) || null
+}
+
+function deleteBrowserProfile(id) {
+  const profileId = String(id || '')
+  const profile = getBrowserProfileById(profileId)
+
+  if (!profile) throw new Error('Browser profile not found')
+  if (Number(profile.is_default) === 1) throw new Error('The default profile cannot be deleted')
+
+  const wasActive = getActiveBrowserProfileId() === profileId
+
+  db.transaction(() => {
+    if (wasActive) {
+      db.prepare("UPDATE browser_profile_state SET active_profile_id='default' WHERE id=1").run()
+      const ts = now()
+      db.prepare("UPDATE browser_profiles SET last_used_at=?, updated_at=? WHERE id='default'").run(ts, ts)
+    }
+
+    db.prepare('DELETE FROM nostr_permissions WHERE browser_profile_id=?').run(profileId)
+    db.prepare('DELETE FROM nostr_profile WHERE browser_profile_id=?').run(profileId)
+    db.prepare('DELETE FROM browser_profiles WHERE id=?').run(profileId)
+  })()
+
+  return {
+    ok: true,
+    deleted_profile_id: profileId,
+    was_active: wasActive,
+    active_profile: getActiveBrowserProfile(),
+  }
 }
 function setSetting(key, value) {
   db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, value)
@@ -631,7 +704,7 @@ function clearNostrPermissions(browserProfileId = null) {
 module.exports = {
   init,
   getSetting, setSetting,
-  getActiveBrowserProfile, listBrowserProfiles, createBrowserProfile, renameBrowserProfile, setActiveBrowserProfile, getBrowserProfileById,
+  getActiveBrowserProfile, getActiveBrowserProfileId, listBrowserProfiles, createBrowserProfile, renameBrowserProfile, setActiveBrowserProfile, getBrowserProfileById, deleteBrowserProfile,
   getPrivacy, setPrivacy,
   addDownload, getDownloads, clearDownloads,
   getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,

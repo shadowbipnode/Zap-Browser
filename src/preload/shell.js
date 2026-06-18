@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('zap', {
   browserProfileCreate: (a) => ipcRenderer.invoke('browser-profile-create', a),
   browserProfileRename: (a) => ipcRenderer.invoke('browser-profile-rename', a),
   browserProfileSetActive: (a) => ipcRenderer.invoke('browser-profile-set-active', a),
+  browserProfileDelete: (a) => ipcRenderer.invoke('browser-profile-delete', a),
 
   // Privacy
   getPrivacy:       () => ipcRenderer.invoke('get-privacy'),
