@@ -58,6 +58,9 @@ export default function BrowserPage() {
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
   const [dragTabId, setDragTabId] = useState<string | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findText, setFindText] = useState('')
+  const findInputRef = useRef<HTMLInputElement | null>(null)
 
 
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
@@ -69,12 +72,13 @@ export default function BrowserPage() {
     activeIdRef.current = activeId
   }, [activeId])
 
-  // Load privacy settings
   useEffect(() => {
-    window.zap?.getDownloadHistory?.().then((items:any[]) => {
-      if (Array.isArray(items)) setDownloads(items)
-    })
-  }, [])
+    if (!findOpen) return
+    setTimeout(() => {
+      findInputRef.current?.focus()
+      findInputRef.current?.select()
+    }, 0)
+  }, [findOpen])
 
   useEffect(() => {
     window.zap?.getPrivacy().then(setPrivacy)
@@ -102,6 +106,47 @@ export default function BrowserPage() {
       window.removeEventListener('keydown', closeFavContextOnEsc)
     }
   }, [])
+
+  const runFind = useCallback((text: string, forward = true, findNext = false) => {
+    const tabId = activeIdRef.current
+    if (!tabId || !text.trim()) return
+
+    window.zap?.tabFind?.({
+      tabId,
+      text: text.trim(),
+      forward,
+      findNext,
+    })
+  }, [])
+
+  const closeFindBar = useCallback(() => {
+    const tabId = activeIdRef.current
+    if (tabId) {
+      window.zap?.tabStopFind?.({ tabId, action: 'clearSelection' })
+    }
+    setFindOpen(false)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isFindShortcut = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'
+
+      if (isFindShortcut) {
+        e.preventDefault()
+        e.stopPropagation()
+        setFindOpen(true)
+        return
+      }
+
+      if (e.key === 'Escape' && findOpen) {
+        e.preventDefault()
+        closeFindBar()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [closeFindBar, findOpen])
 
   // Dynamic bookmarks bar capacity
   useEffect(() => {
@@ -133,7 +178,13 @@ export default function BrowserPage() {
 
   // Listen to events from main process
   useEffect(() => {
-    window.zap?.on('tab-updated', (data: any) => {
+    const disposers: Array<() => void> = []
+    const onZap = (channel: string, cb: (data: any) => void) => {
+      const dispose = window.zap?.on?.(channel, cb)
+      if (typeof dispose === 'function') disposers.push(dispose)
+    }
+
+    onZap('tab-updated', (data: any) => {
       let favicon = undefined
       try {
         if (data.url?.startsWith('http')) {
@@ -151,14 +202,14 @@ export default function BrowserPage() {
       })
       if (data.tabId === activeIdRef.current && data.url) setAddrVal(data.url)
     })
-    window.zap?.on('blocked-count', (n: number) => setBlocked(n))
-    window.zap?.on('ua-mode-updated', async () => {
+    onZap('blocked-count', (n: number) => setBlocked(n))
+    onZap('ua-mode-updated', async () => {
       const p = await window.zap?.getPrivacy()
       setPrivacy(p)
       setUaDrop(false)
     })
 
-    window.zap?.on('open-new-tab', ({ url }: any) => {
+    onZap('open-new-tab', ({ url }: any) => {
       const now = Date.now()
       const w = window as any
 
@@ -171,8 +222,8 @@ export default function BrowserPage() {
 
       handleNewTab(url)
     })
-    window.zap?.on('payment-detected', (data: any) => setPayment(data))
-    window.zap?.on('popup-blocked', (data: any) => {
+    onZap('payment-detected', (data: any) => setPayment(data))
+    onZap('popup-blocked', (data: any) => {
       setPopupBlocked(data || {})
       setTimeout(() => setPopupBlocked(null), 4500)
     })
@@ -184,16 +235,16 @@ export default function BrowserPage() {
       }
     })
 
-    window.zap?.on('download-started', (data: any) => {
+    onZap('download-started', (data: any) => {
       setDownloads(prev => [data, ...prev.filter(d => d.id !== data.id)])
       setDownloadsOpen(true)
     })
 
-    window.zap?.on('download-updated', (data: any) => {
+    onZap('download-updated', (data: any) => {
       setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
     })
 
-    window.zap?.on('download-done', (data: any) => {
+    onZap('download-done', (data: any) => {
       setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
       setDownloadsOpen(true)
 
@@ -204,7 +255,7 @@ export default function BrowserPage() {
       } catch (_) {}
     })
 
-    window.zap?.on('address-suggestion-picked', (data: any) => {
+    onZap('address-suggestion-picked', (data: any) => {
       if (!data?.url) return
       setAddrVal(data.url)
       setSuggestions([])
@@ -214,7 +265,7 @@ export default function BrowserPage() {
       handleNavigate(data.url)
     })
 
-    window.zap?.on('bookmark-open-new-tab', (bookmark: any) => {
+    onZap('bookmark-open-new-tab', (bookmark: any) => {
       if (!bookmark?.url) return
 
       const now = Date.now()
@@ -231,12 +282,12 @@ export default function BrowserPage() {
       handleNewTab(bookmark.url)
     })
 
-    window.zap?.on('bookmark-rename', (bookmark: any) => {
+    onZap('bookmark-rename', (bookmark: any) => {
       setFavRename(bookmark)
       setFavRenameValue(bookmark?.title || '')
     })
 
-    window.zap?.on('bookmark-delete', async (bookmark: any) => {
+    onZap('bookmark-delete', async (bookmark: any) => {
       if (!bookmark?.id) return
 
       const w = window as any
@@ -275,7 +326,7 @@ export default function BrowserPage() {
       }
     })
 
-    window.zap?.on('bookmark-folder-picked', (item: any) => {
+    onZap('bookmark-folder-picked', (item: any) => {
       const url = typeof item === 'string' ? item : item?.url
 
       if (!url) return
@@ -284,7 +335,7 @@ export default function BrowserPage() {
       handleNavigate(url)
     })
 
-    window.zap?.on('bookmark-create-folder-request', async (data: any) => {
+    onZap('bookmark-create-folder-request', async (data: any) => {
       console.log('[DEBUG][renderer] bookmark-create-folder-request received', data)
       console.log('[BookmarksBar] create folder request received')
 
@@ -360,6 +411,9 @@ export default function BrowserPage() {
     window.addEventListener('toggle-favbar', onToggleFavBar)
 
     return () => {
+      disposers.forEach(dispose => {
+        try { dispose() } catch (_) {}
+      })
       if (balanceWatcherTimer) clearInterval(balanceWatcherTimer)
       window.removeEventListener('navigate-to', onNavigateTo)
       window.removeEventListener('toggle-favbar', onToggleFavBar)
@@ -1020,6 +1074,49 @@ export default function BrowserPage() {
           <button className={`panel-btn ${panel === 'settings' ? 'active' : ''}`} onClick={() => togglePanel('settings')}>⚙️</button>
         </div>
       </div>
+      {findOpen && (
+        <div className="find-bar">
+          <span className="find-label">Find</span>
+          <input
+            ref={findInputRef}
+            className="find-input"
+            value={findText}
+            onChange={(e) => {
+              const value = e.target.value
+              setFindText(value)
+              runFind(value, true, false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                closeFindBar()
+                return
+              }
+
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                runFind(findText, !e.shiftKey, true)
+              }
+            }}
+            spellCheck={false}
+          />
+          <button
+            className="find-btn"
+            title="Previous match"
+            onClick={() => runFind(findText, false, true)}
+          >
+            ↑
+          </button>
+          <button
+            className="find-btn"
+            title="Next match"
+            onClick={() => runFind(findText, true, true)}
+          >
+            ↓
+          </button>
+          <button className="find-btn" title="Close find" onClick={closeFindBar}>×</button>
+        </div>
+      )}
       {showBookmarkSave && (
         <div
           onClick={() => setShowBookmarkSave(false)}

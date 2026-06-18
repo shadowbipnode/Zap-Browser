@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('zap', {
   tabBack:     (a) => ipcRenderer.invoke('tab-go-back', a),
   tabForward:  (a) => ipcRenderer.invoke('tab-go-forward', a),
   tabReload:   (a) => ipcRenderer.invoke('tab-reload', a),
+  tabFind:     (a) => ipcRenderer.invoke('tab-find', a),
+  tabStopFind: (a) => ipcRenderer.invoke('tab-stop-find', a),
   shellResize: (a) => ipcRenderer.invoke('shell-resize', a),
 
   // Browser profiles
@@ -96,6 +98,8 @@ contextBridge.exposeInMainWorld('zap', {
   renameFavorite:      (a) => ipcRenderer.invoke('rename-favorite', a),
   moveFavorite:        (a) => ipcRenderer.invoke('move-favorite', a),
   importFavoritesHtml: (a) => ipcRenderer.invoke('import-favorites-html', a),
+  detectBookmarkImportSources: () => ipcRenderer.invoke('detect-bookmark-import-sources'),
+  importBookmarksFromBrowser: (a) => ipcRenderer.invoke('import-bookmarks-from-browser', a),
   exportFavoritesHtml: () => ipcRenderer.invoke('export-favorites-html'),
 
   // Cashu
@@ -147,12 +151,17 @@ contextBridge.exposeInMainWorld('zap', {
       'ua-mode-updated',
       'bookmark-folder-picked',
     ]
-    if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => {
+    if (!allowed.includes(channel)) return undefined
+
+    const listener = (_, data) => {
       if (channel === 'bookmark-create-folder-request') {
         console.log('[DEBUG][preload] event received:', channel, data)
       }
       cb(data)
-    })
+    }
+
+    ipcRenderer.on(channel, listener)
+    return () => ipcRenderer.removeListener(channel, listener)
   },
   off: (channel, cb) => ipcRenderer.removeListener(channel, cb),
 })
