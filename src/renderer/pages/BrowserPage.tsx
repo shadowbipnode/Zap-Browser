@@ -18,8 +18,9 @@ interface TabState {
 
 export default function BrowserPage() {
   const { L } = useLang()
-  const { tabs, activeId, addTab, closeTab, setActive, reorderTabs, updateTab, navigate } = useBrowser()
+  const { tabs, activeId, addTab, closeTab, setActive, reorderTabs, updateTab, navigate, resetTabs } = useBrowser()
   const [panel, setPanel]       = useState<Panel>(null)
+  const [browserProfile, setBrowserProfile] = useState<any>(null)
   const [addrVal, setAddrVal]   = useState('')
   const [privacy, setPrivacy]   = useState<any>(null)
   const [uaDrop, setUaDrop]     = useState(false)
@@ -82,6 +83,7 @@ export default function BrowserPage() {
 
   useEffect(() => {
     window.zap?.getPrivacy().then(setPrivacy)
+    window.zap?.browserProfileActive?.().then(setBrowserProfile)
     const loadFavBar = () => window.zap?.getFavorites().then((f: any[]) => setFavBar(f || []))
     loadFavBar()
     window.addEventListener('favorites-updated', loadFavBar)
@@ -91,6 +93,30 @@ export default function BrowserPage() {
     window.zap?.getBlockedCount().then(setBlocked)
     return () => window.removeEventListener('favorites-updated', loadFavBar)
   }, [])
+
+  useEffect(() => {
+    const onProfileChanged = (event: Event) => {
+      const nextProfile = (event as CustomEvent).detail
+      const tab = resetTabs()
+
+      setBrowserProfile(nextProfile || null)
+      setAddrVal('')
+      setFindOpen(false)
+      setFindText('')
+      setPageNostr(false)
+      setV4vInfo(null)
+      setSitePermissions([])
+      setSitePermOpen(false)
+      setShowSuggest(false)
+
+      window.zap?.tabCreate({ tabId: tab.id, private: false }).then(() => {
+        window.zap?.tabHome({ tabId: tab.id })
+      })
+    }
+
+    window.addEventListener('browser-profile-changed', onProfileChanged)
+    return () => window.removeEventListener('browser-profile-changed', onProfileChanged)
+  }, [resetTabs])
 
   useEffect(() => {
     const closeFavContext = () => setFavContext(null)
@@ -1068,6 +1094,13 @@ export default function BrowserPage() {
 
         {/* Panel buttons */}
         <div className="panel-btns">
+          <button
+            className={`panel-btn ${panel === 'settings' ? 'active' : ''}`}
+            title={browserProfile?.name ? `Active profile: ${browserProfile.name}` : 'Browser profiles'}
+            onClick={() => setPanel('settings')}
+          >
+            👤 {browserProfile?.name || 'Default'}
+          </button>
           <button className={`panel-btn ${panel === 'wallet' ? 'active' : ''}`} onClick={() => togglePanel('wallet')}>⚡ Wallet</button>
           <button className={`panel-btn ${panel === 'nostr' ? 'active' : ''}`} onClick={() => togglePanel('nostr')}>🟣</button>
           <button className={`panel-btn ${panel === 'favorites' ? 'active' : ''}`} onClick={() => togglePanel('favorites')}>⭐</button>

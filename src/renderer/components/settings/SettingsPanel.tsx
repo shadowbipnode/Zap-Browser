@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { t, getLang, setLang } from '../../i18n'
 import { THEMES, getTheme, setTheme, ThemeName } from '../../theme'
+import BrowserProfilesSection from './BrowserProfilesSection'
 
 const z = () => (window as any).zap
 type Sec = 'privacy'|'lightning'|'cashu'|'nostr'|'v4v'|'browser'|'history'|'about'
@@ -221,6 +222,8 @@ export default function SettingsPanel({ onClose }: { onClose:()=>void }) {
           {sec==='history' && <HistorySection lang={lang} />}
 
           {sec==='browser' && <>
+            <BrowserProfilesSection lang={lang} />
+
             <div className="sec-title">{t('searchEngine')}</div>
             <select className="inp" style={{marginBottom:16}}>
               <option>DuckDuckGo</option>
