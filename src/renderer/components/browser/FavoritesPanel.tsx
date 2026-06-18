@@ -10,6 +10,14 @@ interface Fav {
   sort_order?:number
 }
 
+interface ImportSource {
+  id:string
+  label:string
+  browser:string
+  profile?:string
+  type:string
+}
+
 interface Props {
   onClose:()=>void
   onNavigate:(url:string)=>void
@@ -31,8 +39,13 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
   const [manualOpen, setManualOpen] = useState(false)
   const [manualTitle, setManualTitle] = useState('')
   const [manualUrl, setManualUrl] = useState('')
+  const [importSources, setImportSources] = useState<ImportSource[]>([])
+  const [importingSource, setImportingSource] = useState<string|null>(null)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    detectImportSources()
+  }, [])
 
   useEffect(() => {
     const reload = () => load()
@@ -43,6 +56,15 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
   const load = () => {
     ;(window as any).zap?.getFavorites().then((items: Fav[]) => setFavs(items || []))
     window.dispatchEvent(new Event('favorites-updated'))
+  }
+
+  const detectImportSources = async () => {
+    try {
+      const sources = await (window as any).zap?.detectBookmarkImportSources?.()
+      setImportSources(Array.isArray(sources) ? sources : [])
+    } catch (_) {
+      setImportSources([])
+    }
   }
 
   const folderOptions = useMemo(() => {
@@ -143,11 +165,30 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
       const text = await file.text()
       const imported = await (window as any).zap?.importFavoritesHtml({ html: text })
 
-      setMsg(`Importati ${imported?.length || 0} preferiti`)
+      setMsg(`Imported ${imported?.importedBookmarks || 0} bookmarks, skipped ${imported?.skippedDuplicates || 0} duplicates`)
       setTimeout(() => setMsg(''), 3000)
       load()
     }
     input.click()
+  }
+
+  const importFromBrowser = async (source: ImportSource) => {
+    setImportingSource(source.id)
+    try {
+      const res = await (window as any).zap?.importBookmarksFromBrowser?.({ sourceId: source.id })
+
+      if (res?.ok === false) {
+        setMsg(res.error || 'Import skipped')
+      } else {
+        setMsg(`Imported ${res?.importedBookmarks || 0} bookmarks from ${source.label}, skipped ${res?.skippedDuplicates || 0} duplicates`)
+        load()
+      }
+    } catch (err:any) {
+      setMsg(err?.message || 'Import failed')
+    } finally {
+      setImportingSource(null)
+      setTimeout(() => setMsg(''), 4000)
+    }
   }
 
   const exportHTML = async () => {
@@ -349,6 +390,36 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
           )}
         </div>
 
+        <div style={{padding:12,background:'var(--bg-3)',border:'1px solid var(--b0)',borderRadius:'var(--r-md)',marginBottom:12}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:800}}>Import from installed browsers</div>
+            <button className="act-btn" onClick={detectImportSources}>Refresh</button>
+          </div>
+
+          {importSources.length > 0 ? (
+            <div style={{display:'grid',gap:6}}>
+              {importSources.map(source => (
+                <button
+                  key={source.id}
+                  className="act-btn"
+                  disabled={importingSource === source.id}
+                  onClick={() => importFromBrowser(source)}
+                  style={{justifyContent:'space-between',display:'flex',alignItems:'center'}}
+                >
+                  <span>{source.label}</span>
+                  <span style={{color:'var(--t2)',fontSize:11}}>
+                    {importingSource === source.id ? 'Importing...' : 'Import'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{fontSize:12,color:'var(--t2)',lineHeight:1.45}}>
+              No supported installed browser profiles were detected on this system. You can still import bookmarks from an HTML file.
+            </div>
+          )}
+        </div>
+
         <div style={{display:'flex',gap:8,marginBottom:10}}>
           <input
             value={search}
@@ -356,7 +427,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
             placeholder="Search bookmarks..."
             style={{flex:1,padding:'8px 10px',borderRadius:'var(--r-md)',background:'var(--bg-2)',color:'var(--t0)',border:'1px solid var(--b1)',fontSize:12}}
           />
-          <button className="act-btn" onClick={importHTML}>Import</button>
+          <button className="act-btn" onClick={importHTML}>Import HTML</button>
           <button className="act-btn" onClick={exportHTML}>Export</button>
         </div>
 
