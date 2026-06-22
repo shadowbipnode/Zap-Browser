@@ -977,10 +977,6 @@ export default function BrowserPage() {
           marginLeft:4,
           flexShrink:0,
         }}>
-          <span title={activeTab?.url?.startsWith('https') ? 'Secure HTTPS connection' : 'Non secure connection'}>
-            {secIcon()}
-          </span>
-
           {nostrAllowed && (
             <span
               title="NIP-07 allowed"
