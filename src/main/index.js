@@ -11,6 +11,7 @@ const nostr  = require('./nostr')
 const nwc    = require('./nwc')
 const bl     = require('./blocklist')
 const cosmetic = require('./cosmetic')
+const overlayProtection = require('./overlayProtection')
 const doh    = require('./doh')
 const v4v    = require('./value4value')
 const cashu  = require('./cashu')
@@ -1129,381 +1130,13 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
 
   function injectOverlayProtection() {
     const priv = DB.getPrivacy(viewProfile.id)
-    if (!priv.adblock || !priv.popup_block || !priv.overlay_block) return
+    if (!priv.adblock) return
 
     view.webContents.executeJavaScript(cosmetic.getCosmeticScript()).catch(() => {})
 
-    view.webContents.executeJavaScript(`
-      (function() {
-        function zapGenericCosmeticShields() {
-          if (document.getElementById('__zap_generic_cosmetic')) return;
-
-          const style = document.createElement('style');
-          style.id = '__zap_generic_cosmetic';
-          style.textContent = [
-            '[id*="div-gpt-ad"], [id*="google_ads_iframe"], [id*="google_ads"], [id*="gpt-ad"], [id*="adunit"], [class*="adunit"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle, [data-ad-slot], [data-ad-client], [data-google-query-id] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }',
-            'iframe[src*="googlesyndication"], iframe[src*="doubleclick"], iframe[src*="googleads"], iframe[src*="adservice"], iframe[src*="/ads/"], iframe[src*="prebid"] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }',
-            '[id*="PN-SKIN"], [id*="PN-INTRO"], [id*="PN-TOP"], [id*="PN-BANNER"], [id*="PN-MPU"], [id*="skin-ad"], [class*="skin-ad"], [id*="ad-skin"], [class*="ad-skin"] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }'
-          ].join('\\n');
-
-          document.documentElement.appendChild(style);
-
-          document.querySelectorAll('[id*="div-gpt-ad"], [id*="google_ads_iframe"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle, [data-ad-slot], [data-ad-client]').forEach(el => {
-            const wrap = el.closest('.ads-contrib, .adunit') || el;
-            wrap.remove();
-          });
-        }
-
-        function zapInjectAdCosmeticCSS() {
-          if (document.getElementById('__zap_ad_cosmetic')) return;
-
-          const style = document.createElement('style');
-          style.id = '__zap_ad_cosmetic';
-          style.textContent = [
-            'html, body { background-image: none !important; background-color: #fff !important; }',
-            '[id*="div-gpt-ad"], [id*="google_ads_iframe"], [id*="PN-SKIN"], [id*="PN-INTRO"], [id*="PN-TOP"], [id*="PN-BANNER"], [id*="PN-MASTHEAD"], [id*="PN-MPU"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle { display: none !important; visibility: hidden !important; height: 0 !important; max-height: 0 !important; overflow: hidden !important; }'
-          ].join('\n');
-          document.documentElement.appendChild(style);
-        }
-
-        function zapKillAdSkins() {
-          zapInjectAdCosmeticCSS();
-          const skinSelectors = [
-            'body',
-            'html',
-            '[class*="skin"]',
-            '[id*="skin"]',
-            '[class*="wallpaper"]',
-            '[id*="wallpaper"]',
-            '[class*="background"]',
-            '[id*="background"]',
-            '[class*="masthead"]',
-            '[id*="masthead"]'
-          ];
-
-          for (const sel of skinSelectors) {
-            document.querySelectorAll(sel).forEach(el => {
-              const st = window.getComputedStyle(el);
-              const bg = st.backgroundImage || '';
-
-              if (
-                bg &&
-                bg !== 'none' &&
-                /(ad|adv|ads|banner|pubblic|sponsor|campaign|autoligure|volkswagen|promo|coop|ipercoop|buono|sconto|bmw|gino)/i.test(bg)
-              ) {
-                el.style.backgroundImage = 'none';
-                el.style.background = 'transparent';
-              }
-            // });
-          }
-        }
-
-        function zapHideBottomPromoBanners() {
-          const promoRegex = /(abbonati|abbonamento|offerta|promo|scopri di più|buono regalo|amazon|subscribe|subscription|limited offer|sponsor|advert)/i
-
-          document.querySelectorAll('body > div, body > section, body > aside').forEach(el => {
-            const st = window.getComputedStyle(el)
-            const r = el.getBoundingClientRect()
-            const txt = String(el.innerText || el.textContent || '').slice(0, 600)
-
-            const isFixedOrSticky =
-              st.position === 'fixed' ||
-              st.position === 'sticky'
-
-            const isBottomBanner =
-              isFixedOrSticky &&
-              r.width >= window.innerWidth * 0.55 &&
-              r.height >= 70 &&
-              r.height <= window.innerHeight * 0.38 &&
-              r.bottom >= window.innerHeight - 8
-
-            if (isBottomBanner && promoRegex.test(txt)) {
-              el.style.setProperty('display', 'none', 'important')
-              el.style.setProperty('visibility', 'hidden', 'important')
-              el.style.setProperty('height', '0px', 'important')
-              el.style.setProperty('max-height', '0px', 'important')
-              el.style.setProperty('overflow', 'hidden', 'important')
-            }
-          })
-        }
-
-        function zapKillAdElements() {
-          const adRegex = /(googlesyndication|doubleclick|googleads|adform|adnxs|criteo|taboola|outbrain|mgid|teads|smartadserver|openx|rubicon|yieldlove|prebid|adsbygoogle|pubblicit|sponsor)/i;
-
-          document.querySelectorAll('iframe, ins, .adsbygoogle, [data-ad-slot], [data-ad-client], [data-google-query-id]').forEach(el => {
-            const html = (
-              (el.id || '') + ' ' +
-              (el.className || '') + ' ' +
-              (el.getAttribute?.('src') || '') + ' ' +
-              (el.getAttribute?.('data-ad-slot') || '') + ' ' +
-              (el.getAttribute?.('data-ad-client') || '') + ' ' +
-              (el.getAttribute?.('data-google-query-id') || '')
-            );
-
-            if (adRegex.test(html) || el.tagName === 'IFRAME' || el.tagName === 'INS') {
-              el.style.setProperty('display', 'none', 'important');
-              el.style.setProperty('visibility', 'hidden', 'important');
-              el.style.setProperty('height', '0px', 'important');
-              el.style.setProperty('max-height', '0px', 'important');
-              el.style.setProperty('overflow', 'hidden', 'important');
-            }
-          });
-        }
-
-        function zapKillAdImagesAndLinks() {
-          const adTextRegex = /(pubblicit|advert|sponsor|promo|coupon|offerta|scopri|buono|sconto|coop|ipercoop|autoligure|volkswagen|bmw|gino|banner)/i;
-
-          document.querySelectorAll('a, img, picture, source, div, section, aside').forEach(el => {
-            if (zapLooksLikePaywall && zapLooksLikePaywall(el)) return;
-
-            const st = window.getComputedStyle(el);
-            const r = el.getBoundingClientRect();
-
-            if (r.width < 120 || r.height < 40) return;
-
-            const txt = [
-              el.innerText || '',
-              el.getAttribute?.('href') || '',
-              el.getAttribute?.('src') || '',
-              el.getAttribute?.('srcset') || '',
-              el.getAttribute?.('alt') || '',
-              el.getAttribute?.('title') || '',
-              el.id || '',
-              el.className || ''
-            ].join(' ');
-
-            const looksAd = adTextRegex.test(txt);
-            if (!looksAd) return;
-
-            const isTopBanner =
-              r.width >= window.innerWidth * 0.45 &&
-              r.height >= 80 &&
-              r.top <= 260;
-
-            const isSideSkin =
-              r.height >= window.innerHeight * 0.35 &&
-              r.width >= 120 &&
-              (r.left <= 80 || r.right >= window.innerWidth - 80);
-
-            const isLargeInlineAd =
-              r.width >= window.innerWidth * 0.35 &&
-              r.height >= 90;
-
-            if (isTopBanner || isSideSkin || isLargeInlineAd) {
-              el.style.setProperty('display', 'none', 'important');
-              el.style.setProperty('visibility', 'hidden', 'important');
-              el.style.setProperty('height', '0px', 'important');
-              el.style.setProperty('max-height', '0px', 'important');
-              el.style.setProperty('overflow', 'hidden', 'important');
-            }
-          });
-        }
-
-        function zapHasPaywallFramework() {
-          const html = document.documentElement.innerHTML.slice(0, 500000);
-
-          return /tinypass|piano|tp-backdrop|tp-active|paywall|subscription|abbonati|abbonamento/i.test(html);
-        }
-
-        function zapLooksLikePaywall(el) {
-          const txt = String(el.innerText || '').toLowerCase()
-          const html = String(el.outerHTML || '').toLowerCase()
-
-          return /tinypass|piano|tp-backdrop|tp-active|paywall|subscription|subscribe|abbonati|abbonamento|accedi|login/.test(html + ' ' + txt)
-        }
-
-        function zapLooksLikeAdOverlay(el) {
-          const txt = String(el.innerText || '').toLowerCase()
-          const html = String(el.outerHTML || '').toLowerCase()
-
-          if (zapLooksLikePaywall(el)) return false
-
-          return /pubblicit|advert|advertising|sponsor|sponsored|promo|coupon|offerta|limited|scopri di più|scopri come|buono|sconto|banner|adv|adsbygoogle|googlesyndication|doubleclick|amazon|coop|ipercoop|autoligure|volkswagen|bmw|fullscreen|skip intro|salta intro|entra nel sito/.test(html + ' ' + txt)
-        }
-
-        function zapKillAdOverlays() {
-          // document.querySelectorAll('body *').forEach(el => {
-            const st = window.getComputedStyle(el)
-            const r = el.getBoundingClientRect()
-
-            if (r.width < 120 || r.height < 50) return
-            if (!zapLooksLikeAdOverlay(el)) return
-
-            const z = parseInt(st.zIndex || '0', 10)
-
-            const isFixedOrSticky =
-              st.position === 'fixed' ||
-              st.position === 'sticky'
-
-            const isBigOverlay =
-              r.width >= window.innerWidth * 0.45 &&
-              r.height >= window.innerHeight * 0.18 &&
-              z >= 10
-
-            const isBottomBanner =
-              isFixedOrSticky &&
-              r.width >= window.innerWidth * 0.45 &&
-              r.bottom >= window.innerHeight - 20
-
-            const isSideRail =
-              r.height >= window.innerHeight * 0.45 &&
-              r.width >= 120 &&
-              (r.left <= 20 || r.right >= window.innerWidth - 20)
-
-            const isInterstitial =
-              r.width >= window.innerWidth * 0.45 &&
-              r.height >= window.innerHeight * 0.35 &&
-              z >= 10
-
-            if (isBigOverlay || isBottomBanner || isSideRail || isInterstitial) {
-              el.remove()
-            }
-          })
-
-          document.body.style.overflow = ''
-          document.documentElement.style.overflow = ''
-        }
-
-        function zapClickSkipIntro() {
-          document.querySelectorAll('a, button').forEach(el => {
-            const txt = String(el.innerText || el.textContent || '').toLowerCase()
-            const href = String(el.getAttribute?.('href') || '').toLowerCase()
-
-            if (
-              txt.includes('salta intro') ||
-              txt.includes('entra nel sito') ||
-              txt.includes('skip intro') ||
-              href.includes('noadv') ||
-              href.includes('skip')
-            ) {
-              el.click()
-            }
-          })
-        }
-
-        function zapKillAggressiveOverlays() {
-          zapGenericCosmeticShields();
-          zapClickSkipIntro();
-
-          // Precise GPT / Google Ads cleanup
-          document.querySelectorAll('[id*="div-gpt-ad"], [id*="google_ads_iframe"], .ads-contrib, .adunit').forEach(el => {
-            const wrap = el.closest('.ads-contrib') || el;
-            wrap.remove();
-          });
-
-          const hasPaywall = zapHasPaywallFramework();
-
-          // Disabled in Balanced Shields mode
-          // zapKillAdSkins();
-          zapKillAdElements();
-          zapHideBottomPromoBanners();
-          // Fully disabled in Balanced Shields v0.4
-
-          if (hasPaywall) {
-            // Balanced Shields: avoid global overflow reset
-            // Balanced Shields: avoid global overflow reset
-            return;
-          }
-
-          const selectors = [
-            
-            
-            
-            
-            
-            
-            '[class*="interstitial"]',
-            '[id*="interstitial"]',
-            '[class*="cookie"]',
-            '[id*="cookie"]',
-            '[class*="advert"]',
-            '[id*="advert"]',
-            
-            
-            '[class*="adv"]',
-            '[id*="adv"]',
-            '[class*="sponsor"]',
-            '[id*="sponsor"]'
-          ];
-
-          for (const sel of selectors) {
-            document.querySelectorAll(sel).forEach(el => {
-              const st = window.getComputedStyle(el);
-              const rect = el.getBoundingClientRect();
-
-              const z = parseInt(st.zIndex || '0', 10);
-              const coversScreen =
-                (st.position === 'fixed' || st.position === 'absolute') &&
-                rect.width >= window.innerWidth * 0.45 &&
-                rect.height >= window.innerHeight * 0.25 &&
-                z >= 5;
-
-              if (coversScreen) {
-                el.style.setProperty('display', 'none', 'important');
-                el.style.setProperty('visibility', 'hidden', 'important');
-              }
-            });
-          }
-
-          // Balanced Shields: avoid global overflow reset
-          // Balanced Shields: avoid global overflow reset
-        }
-
-        if (location.hostname.includes('cittadellaspezia')) {
-          setTimeout(() => {
-            [...document.querySelectorAll('body *')].forEach(el => {
-              const st = getComputedStyle(el);
-              const r = el.getBoundingClientRect();
-              const txt = [
-                el.id || '',
-                el.className || '',
-                el.getAttribute?.('src') || '',
-                el.getAttribute?.('href') || '',
-                el.getAttribute?.('style') || '',
-                el.innerText || ''
-              ].join(' ').slice(0, 300);
-
-              if (
-                r.width >= innerWidth * 0.35 ||
-                r.height >= innerHeight * 0.25 ||
-                st.position === 'fixed' ||
-                st.position === 'sticky'
-              ) {
-                console.warn('[ZapAds]', JSON.stringify({
-                  tag: el.tagName,
-                  id: el.id || '',
-                  cls: String(el.className || '').slice(0,120),
-                  pos: st.position,
-                  z: st.zIndex,
-                  w: Math.round(r.width),
-                  h: Math.round(r.height),
-                  top: Math.round(r.top),
-                  left: Math.round(r.left),
-                  txt
-                }));
-              }
-            });
-          }, 3000);
-        }
-
-        zapKillAggressiveOverlays();
-        setTimeout(zapKillAggressiveOverlays, 250);
-        setTimeout(zapKillAggressiveOverlays, 750);
-        setTimeout(zapKillAggressiveOverlays, 1500);
-        setTimeout(zapKillAggressiveOverlays, 3000);
-
-        if (!window.__zapOverlayObserver) {
-          window.__zapOverlayObserver = new MutationObserver(() => {
-            setTimeout(zapKillAggressiveOverlays, 50);
-          });
-
-          window.__zapOverlayObserver.observe(document.documentElement, {
-            childList: true,
-            subtree: true
-          });
-        }
-      })();
-    `).catch(()=>{})
+    if (overlayProtection.shouldEnableOverlayProtection(priv)) {
+      view.webContents.executeJavaScript(overlayProtection.getOverlayProtectionScript()).catch(() => {})
+    }
   }
 
   view.webContents.on('dom-ready', injectOverlayProtection)
@@ -1560,7 +1193,7 @@ function setupPrivacy(ses) {
       }
     } catch (_) {}
 
-    const earlyBlockPatterns = [
+    const compatibilityPatterns = [
       'quantcast',
       'qc-cmp',
       'didomi',
@@ -1580,6 +1213,16 @@ function setupPrivacy(ses) {
       'cookielaw',
       'cookie-law',
       'cookieconsent',
+      'tinypass',
+      'piano.io'
+    ]
+
+    const requestUrl = details.url.toLowerCase()
+    if (compatibilityPatterns.some(pattern => requestUrl.includes(pattern))) {
+      return cb({})
+    }
+
+    const earlyBlockPatterns = [
       'adsystem',
       'doubleclick',
       'googlesyndication',
@@ -1593,7 +1236,7 @@ function setupPrivacy(ses) {
       'outbrain'
     ]
 
-    if (earlyBlockPatterns.some(p => details.url.toLowerCase().includes(p))) {
+    if (earlyBlockPatterns.some(p => requestUrl.includes(p))) {
       bl.incrementBlocked()
       mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
       return cb({ cancel: true })

@@ -38,25 +38,15 @@ function getCosmeticScript() {
         el.style.setProperty('overflow', 'hidden', 'important');
       }
 
-      function zapClickSkipIntro() {
-        document.querySelectorAll('a, button').forEach(el => {
-          const txt = String(el.innerText || el.textContent || '').toLowerCase();
-          const href = String(el.getAttribute?.('href') || '').toLowerCase();
-
-          if (
-            txt.includes('salta intro') ||
-            txt.includes('entra nel sito') ||
-            txt.includes('skip intro') ||
-            href.includes('noadv') ||
-            href.includes('skip')
-          ) {
-            try { el.click(); } catch (_) {}
-          }
-        });
+      function zapMatchesWithin(root, selector) {
+        const matches = [];
+        if (root?.nodeType === Node.ELEMENT_NODE && root.matches(selector)) matches.push(root);
+        if (root?.querySelectorAll) matches.push(...root.querySelectorAll(selector));
+        return matches;
       }
 
-      function zapCleanAdNodes() {
-        document.querySelectorAll(
+      function zapCleanAdNodes(root) {
+        zapMatchesWithin(root,
           '[id^="div-gpt-ad"], [id*="div-gpt-ad"], [id*="google_ads_iframe"], .ads-contrib, .ads-container, .ads-manchette, .masthead-top, .ad_column, .pct-banner, .adunit, .adsbygoogle, ins.adsbygoogle, [data-ad-slot], [data-ad-client], [data-google-query-id], #banner-overlay-mobile-fixed, .simple_overlay_header'
         ).forEach(el => {
           const wrap = el.closest('.ads-contrib, .ads-container, .ads-manchette, .masthead-top, .ad_column, .pct-banner, .adunit, [id^="div-gpt-ad"], [id*="div-gpt-ad"], .simple_overlay_header') || el;
@@ -64,25 +54,25 @@ function getCosmeticScript() {
         });
       }
 
-      function zapCleanIntroOverlays() {
-        document.querySelectorAll(
-          '#divPubblicita, [id*="Pubblicita"], [id*="pubblicita"], #banner-overlay-mobile-fixed, #div-gpt-ad-PN-INTRO-01, [id*="PN-INTRO"], [id*="INTRO"], .simple_overlay_header'
+      function zapCleanIntroOverlays(root) {
+        zapMatchesWithin(root,
+          '#divPubblicita, [id*="Pubblicita"], [id*="pubblicita"], #banner-overlay-mobile-fixed, #div-gpt-ad-PN-INTRO-01, [id*="PN-INTRO"], .simple_overlay_header'
         ).forEach(el => {
           zapHide(el);
         });
 
-        document.body.style.overflow = '';
-        document.documentElement.style.overflow = '';
       }
 
-      function zapCleanBackgroundSkins() {
-        const bodyBg = getComputedStyle(document.body).backgroundImage || '';
-        if (/googlesyndication|doubleclick|googleads|adservice|simgad/i.test(bodyBg)) {
-          document.body.style.setProperty('background-image', 'none', 'important');
-          document.body.style.setProperty('background', '#fff', 'important');
+      function zapCleanBackgroundSkins(root) {
+        if (root === document && document.body) {
+          const bodyBg = getComputedStyle(document.body).backgroundImage || '';
+          if (/googlesyndication|doubleclick|googleads|adservice|simgad/i.test(bodyBg)) {
+            document.body.style.setProperty('background-image', 'none', 'important');
+            document.body.style.setProperty('background', '#fff', 'important');
+          }
         }
 
-        document.querySelectorAll('body *').forEach(el => {
+        zapMatchesWithin(root, '[class*="skin" i], [id*="skin" i], [class*="wallpaper" i], [id*="wallpaper" i], [class*="background" i], [id*="background" i], [class*="masthead" i], [id*="masthead" i]').forEach(el => {
           if (zapLooksLikePaywall(el)) return;
 
           const st = getComputedStyle(el);
@@ -113,32 +103,37 @@ function getCosmeticScript() {
         });
       }
 
-      function zapRunCosmeticCleanup() {
+      function zapRunCosmeticCleanup(root = document) {
         zapInjectCSS();
-        zapClickSkipIntro();
-        zapCleanAdNodes();
-        zapCleanIntroOverlays();
-        zapCleanBackgroundSkins();
+        zapCleanAdNodes(root);
+        zapCleanIntroOverlays(root);
+        zapCleanBackgroundSkins(root);
       }
 
       zapRunCosmeticCleanup();
-      setTimeout(zapRunCosmeticCleanup, 100);
       setTimeout(zapRunCosmeticCleanup, 250);
-      setTimeout(zapRunCosmeticCleanup, 750);
-      setTimeout(zapRunCosmeticCleanup, 1500);
+      setTimeout(zapRunCosmeticCleanup, 1000);
       setTimeout(zapRunCosmeticCleanup, 3000);
 
       if (!window.__zapCosmeticObserver) {
-        window.__zapCosmeticObserver = new MutationObserver(() => {
+        window.__zapCosmeticPending = new Set();
+        window.__zapCosmeticObserver = new MutationObserver(records => {
+          for (const record of records) {
+            for (const node of record.addedNodes) {
+              if (node.nodeType === Node.ELEMENT_NODE) window.__zapCosmeticPending.add(node);
+            }
+          }
           clearTimeout(window.__zapCosmeticTimer);
-          window.__zapCosmeticTimer = setTimeout(zapRunCosmeticCleanup, 120);
+          window.__zapCosmeticTimer = setTimeout(() => {
+            const roots = Array.from(window.__zapCosmeticPending).slice(0, 60);
+            window.__zapCosmeticPending.clear();
+            roots.forEach(zapRunCosmeticCleanup);
+          }, 120);
         });
 
         window.__zapCosmeticObserver.observe(document.documentElement, {
           childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['style', 'class', 'id']
+          subtree: true
         });
       }
     })();

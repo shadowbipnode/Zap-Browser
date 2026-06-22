@@ -8,6 +8,7 @@ const result = spawnSync(electronPath, [
   'test/migration-hardening.test.js',
   'test/profile-architecture.test.js',
   'test/bookmark-ordering.test.js',
+  'test/overlay-protection.test.js',
 ], {
   cwd: process.cwd(),
   env: {
