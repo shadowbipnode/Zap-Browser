@@ -41,9 +41,10 @@ jobs:
         with:
           name: zap-browser-linux
           path: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.rpm
+            dist/Zap-Browser-*-linux-*.AppImage
+            dist/Zap-Browser-*-linux-*.deb
+            dist/Zap-Browser-*-linux-*.rpm
+          if-no-files-found: error
 
   build-windows:
     name: Build Windows
@@ -63,7 +64,7 @@ jobs:
       - name: Build renderer
         run: npx vite build --config src/renderer/vite.config.ts
 
-      - name: Build Windows installer and portable builds
+      - name: Build Windows installer and portable ZIP
         run: npx electron-builder --win nsis zip --publish never
 
       - name: Upload Windows artifacts
@@ -71,8 +72,9 @@ jobs:
         with:
           name: zap-browser-windows
           path: |
-            dist/*.exe
-            dist/*.zip
+            dist/Zap-Browser-Setup-*.exe
+            dist/Zap-Browser-Portable-*.zip
+          if-no-files-found: error
 
   publish-release:
     name: Publish GitHub Release
@@ -150,8 +152,8 @@ jobs:
           name: Zap Browser ${{ github.ref_name }} — Privacy, Tor & Native Browser UX
           body_path: RELEASE_NOTES.md
           files: |
-            release-artifacts/**/*.AppImage
-            release-artifacts/**/*.deb
-            release-artifacts/**/*.rpm
-            release-artifacts/**/*.exe
-            release-artifacts/**/*.zip
+            release-artifacts/**/Zap-Browser-*-linux-*.AppImage
+            release-artifacts/**/Zap-Browser-*-linux-*.deb
+            release-artifacts/**/Zap-Browser-*-linux-*.rpm
+            release-artifacts/**/Zap-Browser-Setup-*.exe
+            release-artifacts/**/Zap-Browser-Portable-*.zip
