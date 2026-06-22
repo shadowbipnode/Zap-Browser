@@ -102,9 +102,12 @@ const tabErrorPages = new Map()
 let activeTabId = null
 let navigationOwnerTabId = null
 let isSwitching = false
+let shellLayout = { panelWidth: 0 }
 const activeDownloads = new Map()
 const lastTabUpdates = new Map()
 const configuredSessions = new Set()
+const configuredSessionProfileIds = new Map()
+const privacySessions = new Set()
 const downloadSessions = new Set()
 const webContentsProfileIds = new Map()
 
@@ -193,8 +196,16 @@ function getPrivateSession(profile, tabId) {
   return profileContext.getPrivateSession(session, profile?.id, tabId)
 }
 
+function getBrowserProfileIdForSession(ses) {
+  return configuredSessionProfileIds.get(ses) || 'default'
+}
+
+function getPrivacyForSession(ses) {
+  return DB.getPrivacy(getBrowserProfileIdForSession(ses))
+}
+
 function setUserAgentForSession(ses) {
-  const priv = DB.getPrivacy()
+  const priv = getPrivacyForSession(ses)
   ses.setUserAgent(priv?.ua_mode === 'default' ? '' : currentUA)
 }
 
@@ -204,10 +215,11 @@ function setUserAgentForConfiguredSessions() {
   }
 }
 
-function configureBrowserSession(ses) {
+function configureBrowserSession(ses, profile = null) {
   if (!ses) return ses
 
   configuredSessions.add(ses)
+  configuredSessionProfileIds.set(ses, profile?.id || getBrowserProfileIdForSession(ses))
   setUserAgentForSession(ses)
   setupPrivacy(ses)
   setupDownloads(ses)
@@ -216,13 +228,23 @@ function configureBrowserSession(ses) {
   return ses
 }
 
+function forgetBrowserProfileSessions(profileId) {
+  for (const [ses, configuredProfileId] of configuredSessionProfileIds.entries()) {
+    if (configuredProfileId !== profileId) continue
+    configuredSessionProfileIds.delete(ses)
+    configuredSessions.delete(ses)
+    privacySessions.delete(ses)
+    downloadSessions.delete(ses)
+  }
+}
+
 function getTabSession(tabId, isPrivate = false, profile = null) {
   const targetProfile = profile || getBrowserProfileForTab(tabId)
   const ses = isPrivate
     ? getPrivateSession(targetProfile, tabId)
     : getProfileSession(targetProfile)
 
-  return configureBrowserSession(ses)
+  return configureBrowserSession(ses, targetProfile)
 }
 
 function escapeHtml(value) {
@@ -752,8 +774,8 @@ function parseNativePaymentUrl(rawUrl) {
   return null
 }
 
-function getTorProxyConfig() {
-  const priv = DB.getPrivacy()
+function getTorProxyConfig(browserProfileId = null) {
+  const priv = DB.getPrivacy(browserProfileId)
   const enabled = Number(priv?.tor_enabled) === 1
   const host = String(priv?.tor_host || '127.0.0.1').trim()
   const port = Number(priv?.tor_port || 9050)
@@ -783,7 +805,7 @@ function getTorProxyConfig() {
 }
 
 async function applyProxyToSession(ses) {
-  const tor = getTorProxyConfig()
+  const tor = getTorProxyConfig(getBrowserProfileIdForSession(ses))
 
   if (tor.error) return { ok: false, error: tor.error }
 
@@ -1050,7 +1072,7 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
       return { action: 'deny' }
     }
 
-    const priv = DB.getPrivacy()
+    const priv = DB.getPrivacy(viewProfile.id)
     if (!priv.adblock) {
       view.webContents.loadURL(url)
       return { action: 'deny' }
@@ -1106,7 +1128,7 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
   view.webContents.on('will-prevent-unload', (e) => e.preventDefault())
 
   function injectOverlayProtection() {
-    const priv = DB.getPrivacy()
+    const priv = DB.getPrivacy(viewProfile.id)
     if (!priv.adblock || !priv.popup_block || !priv.overlay_block) return
 
     view.webContents.executeJavaScript(cosmetic.getCosmeticScript()).catch(() => {})
@@ -1488,6 +1510,7 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
 
   // Inject cosmetic ad-hiding CSS after each page load
   view.webContents.on('did-finish-load', () => {
+    if (!DB.getPrivacy(viewProfile.id).adblock) return
     const css = bl.getCosmeticCSS()
     if (css) {
       view.webContents.executeJavaScript(`
@@ -1510,8 +1533,11 @@ function createMainView(tabId = null, isPrivate = false, profile = null) {
 
 
 function setupPrivacy(ses) {
+  if (privacySessions.has(ses)) return
+  privacySessions.add(ses)
+
   ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, cb) => {
-    const priv = DB.getPrivacy()
+    const priv = getPrivacyForSession(ses)
     if (!priv.adblock) return cb({})
 
     // Never block static assets — doing so breaks page rendering
@@ -1595,7 +1621,7 @@ function setupPrivacy(ses) {
 
   ses.webRequest.onBeforeSendHeaders((details, cb) => {
     const headers = { ...details.requestHeaders }
-    const priv = DB.getPrivacy()
+    const priv = getPrivacyForSession(ses)
     if (priv.ua_mode !== 'default') headers['User-Agent'] = currentUA
     delete headers['X-Forwarded-For']
     delete headers['Via']
@@ -1604,7 +1630,7 @@ function setupPrivacy(ses) {
   })
 
   ses.setPermissionRequestHandler((wc, permission, cb) => {
-    const priv = DB.getPrivacy()
+    const priv = getPrivacyForSession(ses)
     // Block media if WebRTC protection is on; always block notifications
     if (priv.webrtc_protect && permission === 'media') return cb(false)
     if (permission === 'notifications') return cb(false)
@@ -1693,7 +1719,7 @@ function createWindow() {
 
   activeView = null
 
-  configureBrowserSession(session.defaultSession)
+  configureBrowserSession(session.defaultSession, DB.getBrowserProfileById('default'))
   applyNetworkProxy().catch(err => console.error('[Proxy] apply failed', err))
 
   bl.init((size) => {
@@ -1701,7 +1727,9 @@ function createWindow() {
   })
 
   mainWindow.on('resize', () => {
-    if (activeTabId && tabUrls.get(activeTabId)) showView(mainWindow, activeView)
+    if (activeTabId && tabUrls.get(activeTabId)) {
+      resizeView(mainWindow, activeView, shellLayout)
+    }
   })
 
   if (isDev) {
@@ -1781,6 +1809,11 @@ ipcMain.handle('browser-profile-set-active', async (_, { id }) => {
 
   await disposeAllTabs()
   const profile = DB.setActiveBrowserProfile(id)
+  const priv = DB.getPrivacy(profile.id)
+  doh.setEnabled(Number(priv.doh_enabled) === 1)
+  setUserAgentForConfiguredSessions()
+  await applyNetworkProxy()
+  mainWindow?.webContents.send('privacy-updated', getPrivacyState())
 
   return { ok: true, changed: true, profile }
 })
@@ -1796,8 +1829,17 @@ ipcMain.handle('browser-profile-delete', async (_, { id }) => {
 
   const profileSession = getProfileSession(profile)
   try { await profileContext.clearSessionStorage(profileSession) } catch (_) {}
+  forgetBrowserProfileSessions(profile.id)
 
-  return DB.deleteBrowserProfile(profile.id)
+  const result = DB.deleteBrowserProfile(profile.id)
+  if (result.was_active) {
+    const priv = DB.getPrivacy(result.active_profile.id)
+    doh.setEnabled(Number(priv.doh_enabled) === 1)
+    setUserAgentForConfiguredSessions()
+    await applyNetworkProxy()
+    mainWindow?.webContents.send('privacy-updated', getPrivacyState())
+  }
+  return result
 })
 
 // ── IPC: tabs ─────────────────────────────────────────────────────────────────
@@ -1840,7 +1882,7 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
 
   if (activeView && activeView !== view) hideView(mainWindow, activeView)
   activeView = view
-  showView(mainWindow, activeView)
+  showView(mainWindow, activeView, shellLayout)
 
   const current = activeView.webContents.getURL()
   if (!current || current === 'about:blank') {
@@ -1880,7 +1922,7 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
 
   if (activeView && activeView !== view) hideView(mainWindow, activeView)
   activeView = view
-  showView(mainWindow, activeView)
+  showView(mainWindow, activeView, shellLayout)
 
   await new Promise(r => setTimeout(r, 50))
   view.webContents.loadURL(u).catch((err) => {
@@ -1940,8 +1982,13 @@ ipcMain.handle('tab-stop-find', (_, { tabId, action = 'clearSelection' } = {}) =
 })
 
 ipcMain.handle('shell-resize', (_, args) => {
+  shellLayout = {
+    panelWidth: Number.isFinite(Number(args?.panelWidth))
+      ? Math.max(0, Number(args.panelWidth))
+      : (args?.panelOpen ? 320 : 0),
+  }
   if (!activeTabId || !tabUrls.get(activeTabId)) return
-  resizeView(mainWindow, activeView, args)
+  resizeView(mainWindow, activeView, shellLayout)
 })
 
 ipcMain.handle('download-cancel', (_, { id }) => {
@@ -2059,6 +2106,7 @@ ipcMain.handle('show-ua-menu', () => {
         currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
         setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+        publishPrivacyUpdated()
       },
     },
     {
@@ -2069,6 +2117,7 @@ ipcMain.handle('show-ua-menu', () => {
         DB.setPrivacy('ua_mode', 'default')
         setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'default', ua: '' })
+        publishPrivacyUpdated()
       },
     },
     { type: 'separator' },
@@ -2078,6 +2127,7 @@ ipcMain.handle('show-ua-menu', () => {
         currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
         setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+        publishPrivacyUpdated()
       },
     },
   ])
@@ -2087,26 +2137,51 @@ ipcMain.handle('show-ua-menu', () => {
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────
-ipcMain.handle('get-privacy', () => ({
-  ...DB.getPrivacy(),
-  blockedCount:   bl.getBlockedCount(),
-  blocklistSize:  bl.getListSize(),
-  blocklistReady: bl.isReady(),
-  dohEnabled:     doh.isEnabled(),
-}))
-ipcMain.handle('set-adblock',  (_, { enabled }) => DB.setPrivacy('adblock', enabled ? 1 : 0))
-ipcMain.handle('set-webrtc',   (_, { enabled }) => DB.setPrivacy('webrtc_protect', enabled ? 1 : 0))
-ipcMain.handle('set-popup-block', (_, { enabled }) => DB.setPrivacy('popup_block', enabled ? 1 : 0))
-ipcMain.handle('set-overlay-block', (_, { enabled }) => DB.setPrivacy('overlay_block', enabled ? 1 : 0))
+function getPrivacyState() {
+  const priv = DB.getPrivacy()
+  return {
+    ...priv,
+    blockedCount:   bl.getBlockedCount(),
+    blocklistSize:  bl.getListSize(),
+    blocklistReady: bl.isReady(),
+    dohEnabled:     Number(priv.doh_enabled) === 1,
+  }
+}
+
+function publishPrivacyUpdated() {
+  const state = getPrivacyState()
+  mainWindow?.webContents.send('privacy-updated', state)
+  return state
+}
+
+ipcMain.handle('get-privacy', () => getPrivacyState())
+ipcMain.handle('set-adblock',  (_, { enabled }) => {
+  DB.setPrivacy('adblock', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
+ipcMain.handle('set-webrtc',   (_, { enabled }) => {
+  DB.setPrivacy('webrtc_protect', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
+ipcMain.handle('set-popup-block', (_, { enabled }) => {
+  DB.setPrivacy('popup_block', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
+ipcMain.handle('set-overlay-block', (_, { enabled }) => {
+  DB.setPrivacy('overlay_block', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
 ipcMain.handle('set-ua-mode',  (_, { mode }) => {
   DB.setPrivacy('ua_mode', mode)
   if (mode === 'rotate') currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
   setUserAgentForConfiguredSessions()
+  publishPrivacyUpdated()
   return currentUA
 })
 ipcMain.handle('rotate-ua', () => {
   currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
   setUserAgentForConfiguredSessions()
+  publishPrivacyUpdated()
   return currentUA
 })
 ipcMain.handle('get-blocked-count',  () => bl.getBlockedCount())
@@ -2115,7 +2190,8 @@ ipcMain.handle('set-doh', (_, { enabled, provider }) => {
   doh.setEnabled(enabled)
   if (provider) doh.setProvider(provider)
   DB.setPrivacy('doh_enabled', enabled ? 1 : 0)
-  return { ok: true }
+  if (provider) DB.setPrivacy('doh_provider', provider)
+  return publishPrivacyUpdated()
 })
 ipcMain.handle('set-tor-proxy', async (_, { enabled, host, port } = {}) => {
   DB.setPrivacy('tor_enabled', enabled ? 1 : 0)
@@ -2131,7 +2207,9 @@ ipcMain.handle('set-tor-proxy', async (_, { enabled, host, port } = {}) => {
     DB.setPrivacy('tor_port', safePort)
   }
 
-  return applyNetworkProxy()
+  const result = await applyNetworkProxy()
+  publishPrivacyUpdated()
+  return result
 })
 ipcMain.handle('get-download-history', () => {
   const items = DB.getDownloads()
@@ -2992,14 +3070,16 @@ ipcMain.handle('get-history',   (_, { limit } = {}) => {
 })
 ipcMain.handle('clear-history', () => DB.clearHistory())
 ipcMain.handle('clear-cookies', async () => {
-  const activeSession = configureBrowserSession(getProfileSession(getActiveBrowserProfile()))
+  const activeProfile = getActiveBrowserProfile()
+  const activeSession = configureBrowserSession(getProfileSession(activeProfile), activeProfile)
   await activeSession.clearStorageData({ storages: profileContext.PROFILE_STORAGE_TYPES })
   await activeSession.flushStorageData()
 
   return { ok: true }
 })
 ipcMain.handle('clear-cache', async () => {
-  const activeSession = configureBrowserSession(getProfileSession(getActiveBrowserProfile()))
+  const activeProfile = getActiveBrowserProfile()
+  const activeSession = configureBrowserSession(getProfileSession(activeProfile), activeProfile)
   await activeSession.clearCache()
 
   return { ok: true }

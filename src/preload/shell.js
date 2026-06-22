@@ -150,6 +150,7 @@ contextBridge.exposeInMainWorld('zap', {
       'bookmark-new-folder-request',
       'bookmark-create-folder-request',
       'ua-mode-updated',
+      'privacy-updated',
       'bookmark-folder-picked',
     ]
     if (!allowed.includes(channel)) return undefined

@@ -128,7 +128,7 @@ function init() {
 
 
     CREATE TABLE IF NOT EXISTS privacy_settings (
-      id             INTEGER PRIMARY KEY,
+      browser_profile_id TEXT PRIMARY KEY REFERENCES browser_profiles(id) ON DELETE CASCADE,
       adblock        INTEGER NOT NULL DEFAULT 1,
       webrtc_protect INTEGER NOT NULL DEFAULT 1,
       ua_mode        TEXT    NOT NULL DEFAULT 'rotate',
@@ -141,7 +141,6 @@ function init() {
       popup_block    INTEGER NOT NULL DEFAULT 1,
       overlay_block  INTEGER NOT NULL DEFAULT 1
     );
-    INSERT OR IGNORE INTO privacy_settings (id) VALUES (1);
   `)
 
   try { db.prepare('ALTER TABLE favorites ADD COLUMN parent_id INTEGER').run() } catch (_) {}
@@ -174,9 +173,9 @@ function init() {
   } catch (_) {}
 
 
+migrateBrowserProfiles()
 migrateNwcConnectionsSchema()
 migratePrivacySettingsSchema()
-migrateBrowserProfiles()
 migrateNostrProfilesSchema()
 migrateNostrPermissionsSchema()
 }
@@ -349,10 +348,73 @@ function migrateNwcConnectionsSchema() {
 }
 
 function migratePrivacySettingsSchema() {
-  const columns = db
+  let columns = db
     .prepare('PRAGMA table_info(privacy_settings)')
     .all()
     .map(c => c.name)
+
+  if (!columns.includes('browser_profile_id')) {
+    const legacyValue = (name, fallback) => columns.includes(name) ? name : fallback
+
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE privacy_settings_next (
+          browser_profile_id TEXT PRIMARY KEY REFERENCES browser_profiles(id) ON DELETE CASCADE,
+          adblock            INTEGER NOT NULL DEFAULT 1,
+          webrtc_protect     INTEGER NOT NULL DEFAULT 1,
+          ua_mode            TEXT    NOT NULL DEFAULT 'rotate',
+          custom_ua          TEXT,
+          doh_enabled        INTEGER NOT NULL DEFAULT 1,
+          doh_provider       TEXT    NOT NULL DEFAULT 'https://cloudflare-dns.com/dns-query',
+          tor_enabled        INTEGER NOT NULL DEFAULT 0,
+          tor_host           TEXT    NOT NULL DEFAULT '127.0.0.1',
+          tor_port           INTEGER NOT NULL DEFAULT 9050,
+          popup_block        INTEGER NOT NULL DEFAULT 1,
+          overlay_block      INTEGER NOT NULL DEFAULT 1
+        )
+      `)
+
+      db.exec(`
+        INSERT INTO privacy_settings_next (
+          browser_profile_id,
+          adblock,
+          webrtc_protect,
+          ua_mode,
+          custom_ua,
+          doh_enabled,
+          doh_provider,
+          tor_enabled,
+          tor_host,
+          tor_port,
+          popup_block,
+          overlay_block
+        )
+        SELECT
+          'default',
+          ${legacyValue('adblock', '1')},
+          ${legacyValue('webrtc_protect', '1')},
+          ${legacyValue('ua_mode', "'rotate'")},
+          ${legacyValue('custom_ua', 'NULL')},
+          ${legacyValue('doh_enabled', '1')},
+          ${legacyValue('doh_provider', "'https://cloudflare-dns.com/dns-query'")},
+          ${legacyValue('tor_enabled', '0')},
+          ${legacyValue('tor_host', "'127.0.0.1'")},
+          ${legacyValue('tor_port', '9050')},
+          ${legacyValue('popup_block', '1')},
+          ${legacyValue('overlay_block', '1')}
+        FROM privacy_settings
+        WHERE id=1
+      `)
+
+      db.exec('DROP TABLE privacy_settings')
+      db.exec('ALTER TABLE privacy_settings_next RENAME TO privacy_settings')
+    })()
+
+    columns = db
+      .prepare('PRAGMA table_info(privacy_settings)')
+      .all()
+      .map(c => c.name)
+  }
 
   if (!columns.includes('popup_block')) {
     db.prepare('ALTER TABLE privacy_settings ADD COLUMN popup_block INTEGER NOT NULL DEFAULT 1').run()
@@ -361,6 +423,11 @@ function migratePrivacySettingsSchema() {
   if (!columns.includes('overlay_block')) {
     db.prepare('ALTER TABLE privacy_settings ADD COLUMN overlay_block INTEGER NOT NULL DEFAULT 1').run()
   }
+
+  db.exec(`
+    INSERT OR IGNORE INTO privacy_settings(browser_profile_id)
+    SELECT id FROM browser_profiles
+  `)
 }
 
 const now = () => Math.floor(Date.now() / 1000)
@@ -397,11 +464,14 @@ function createBrowserProfile({ name }) {
   const id = crypto.randomUUID()
   const ts = now()
 
-  db.prepare(`
-    INSERT INTO browser_profiles
-      (id, name, is_default, created_at, updated_at, last_used_at)
-    VALUES (?, ?, 0, ?, ?, ?)
-  `).run(id, title, ts, ts, ts)
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO browser_profiles
+        (id, name, is_default, created_at, updated_at, last_used_at)
+      VALUES (?, ?, 0, ?, ?, ?)
+    `).run(id, title, ts, ts, ts)
+    db.prepare('INSERT INTO privacy_settings(browser_profile_id) VALUES (?)').run(id)
+  })()
 
   return getBrowserProfileById(id)
 }
@@ -453,6 +523,7 @@ function deleteBrowserProfile(id) {
 
     db.prepare('DELETE FROM nostr_permissions WHERE browser_profile_id=?').run(profileId)
     db.prepare('DELETE FROM nostr_profile WHERE browser_profile_id=?').run(profileId)
+    db.prepare('DELETE FROM privacy_settings WHERE browser_profile_id=?').run(profileId)
     db.prepare('DELETE FROM browser_profiles WHERE id=?').run(profileId)
   })()
 
@@ -468,11 +539,6 @@ function setSetting(key, value) {
 }
 
 // ── Privacy ───────────────────────────────────────────────────────────────────
-
-try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_enabled INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
-try { db.prepare("ALTER TABLE privacy_settings ADD COLUMN tor_host TEXT NOT NULL DEFAULT '127.0.0.1'").run() } catch (_) {}
-try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_port INTEGER NOT NULL DEFAULT 9050').run() } catch (_) {}
-
 
 function ensurePrivacyMigrations() {
   const cols = db.prepare("PRAGMA table_info(privacy_settings)").all().map(c => c.name)
@@ -490,15 +556,33 @@ function ensurePrivacyMigrations() {
   }
 }
 
+const PRIVACY_KEYS = new Set([
+  'adblock',
+  'webrtc_protect',
+  'ua_mode',
+  'custom_ua',
+  'doh_enabled',
+  'doh_provider',
+  'tor_enabled',
+  'tor_host',
+  'tor_port',
+  'popup_block',
+  'overlay_block',
+])
 
-function getPrivacy() {
+function getPrivacy(browserProfileId = null) {
   ensurePrivacyMigrations()
-  return db.prepare('SELECT * FROM privacy_settings WHERE id=1').get()
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+  db.prepare('INSERT OR IGNORE INTO privacy_settings(browser_profile_id) VALUES (?)').run(targetBrowserProfileId)
+  return db.prepare('SELECT * FROM privacy_settings WHERE browser_profile_id=?').get(targetBrowserProfileId)
 }
-function setPrivacy(key, value) {
+function setPrivacy(key, value, browserProfileId = null) {
   ensurePrivacyMigrations()
-  db.prepare(`UPDATE privacy_settings SET ${key}=? WHERE id=1`).run(value)
-  return getPrivacy()
+  if (!PRIVACY_KEYS.has(key)) throw new Error('Invalid privacy setting')
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+  db.prepare('INSERT OR IGNORE INTO privacy_settings(browser_profile_id) VALUES (?)').run(targetBrowserProfileId)
+  db.prepare(`UPDATE privacy_settings SET ${key}=? WHERE browser_profile_id=?`).run(value, targetBrowserProfileId)
+  return getPrivacy(targetBrowserProfileId)
 }
 
 // ── Favorites ─────────────────────────────────────────────────────────────────

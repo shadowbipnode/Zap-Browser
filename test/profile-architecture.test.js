@@ -43,6 +43,25 @@ test('migrates legacy profile data and preserves profile isolation', () => {
       (origin, action, decision, created_at, updated_at)
     VALUES
       ('https://example.com', 'getPublicKey', 'allow', 1, 1);
+
+    CREATE TABLE privacy_settings (
+      id INTEGER PRIMARY KEY,
+      adblock INTEGER NOT NULL DEFAULT 1,
+      webrtc_protect INTEGER NOT NULL DEFAULT 1,
+      ua_mode TEXT NOT NULL DEFAULT 'rotate',
+      custom_ua TEXT,
+      doh_enabled INTEGER NOT NULL DEFAULT 1,
+      doh_provider TEXT NOT NULL DEFAULT 'https://cloudflare-dns.com/dns-query',
+      tor_enabled INTEGER NOT NULL DEFAULT 0,
+      tor_host TEXT NOT NULL DEFAULT '127.0.0.1',
+      tor_port INTEGER NOT NULL DEFAULT 9050,
+      popup_block INTEGER NOT NULL DEFAULT 1,
+      overlay_block INTEGER NOT NULL DEFAULT 1
+    );
+    INSERT INTO privacy_settings
+      (id, adblock, webrtc_protect, ua_mode, tor_enabled, tor_host, tor_port)
+    VALUES
+      (1, 0, 0, 'default', 1, '127.0.0.2', 9150);
   `)
   legacy.close()
 
@@ -61,6 +80,9 @@ test('migrates legacy profile data and preserves profile isolation', () => {
 
     assert.equal(DB.getActiveBrowserProfile().id, 'default')
     assert.equal(DB.listNostrPermissions('default').length, 1)
+    assert.equal(DB.getPrivacy('default').adblock, 0)
+    assert.equal(DB.getPrivacy('default').tor_enabled, 1)
+    assert.equal(DB.getPrivacy('default').tor_port, 9150)
 
     const migrated = DB._db()
       .prepare('SELECT browser_profile_id, active FROM nostr_profile WHERE id=1')
@@ -68,6 +90,15 @@ test('migrates legacy profile data and preserves profile isolation', () => {
     assert.deepEqual(migrated, { browser_profile_id: 'default', active: 1 })
 
     const second = DB.createBrowserProfile({ name: 'Work' })
+    assert.equal(DB.getPrivacy(second.id).adblock, 1)
+    assert.equal(DB.getPrivacy(second.id).tor_enabled, 0)
+    DB.setPrivacy('adblock', 0, second.id)
+    DB.setPrivacy('tor_enabled', 1, second.id)
+    assert.equal(DB.getPrivacy('default').adblock, 0)
+    assert.equal(DB.getPrivacy(second.id).adblock, 0)
+    DB.setPrivacy('adblock', 1, second.id)
+    assert.equal(DB.getPrivacy('default').adblock, 0)
+    assert.equal(DB.getPrivacy(second.id).adblock, 1)
     DB.setNostrPermission('https://example.com', 'getPublicKey', 'deny', second.id)
     DB._db().prepare(`
       INSERT INTO nostr_profile
@@ -87,6 +118,9 @@ test('migrates legacy profile data and preserves profile isolation', () => {
 
     DB.setActiveBrowserProfile(second.id)
     assert.equal(DB.getActiveBrowserProfile().id, second.id)
+    DB.setPrivacy('webrtc_protect', 1)
+    assert.equal(DB.getPrivacy().webrtc_protect, 1)
+    assert.equal(DB.getPrivacy('default').webrtc_protect, 0)
 
     const deleted = DB.deleteBrowserProfile(second.id)
     assert.equal(deleted.was_active, true)

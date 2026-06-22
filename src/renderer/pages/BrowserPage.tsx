@@ -136,6 +136,7 @@ export default function BrowserPage() {
       const tab = resetTabs()
 
       setBrowserProfile(nextProfile || null)
+      window.zap?.getPrivacy().then(setPrivacy)
       setAddrVal('')
       setFindOpen(false)
       setFindText('')
@@ -265,6 +266,7 @@ export default function BrowserPage() {
       if (data.tabId === activeIdRef.current && data.url) setAddrVal(data.url)
     })
     onZap('blocked-count', (n: number) => setBlocked(n))
+    onZap('privacy-updated', (state: any) => setPrivacy(state))
     onZap('ua-mode-updated', async () => {
       const p = await window.zap?.getPrivacy()
       setPrivacy(p)
@@ -490,18 +492,27 @@ export default function BrowserPage() {
 
   // Notify main of panel state for view resize
   useEffect(() => {
-    const chromeOverlayOpen =
-      showSuggest ||
-      !!favFolderOpen ||
-      favDropOpen ||
-      !!favContext ||
-      showBookmarkSave ||
-      !!favRename
+    const panelElement = document.querySelector('.side-panel') as HTMLElement | null
+    const syncBrowserViewBounds = () => {
+      window.zap?.shellResize({
+        panelOpen: panel !== null,
+        panelWidth: panelElement?.getBoundingClientRect().width || 0,
+      })
+    }
 
-    window.zap?.shellResize({
-      panelOpen: panel !== null,
-      suggestionsOpen: chromeOverlayOpen
-    })
+    syncBrowserViewBounds()
+
+    const observer = panelElement && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(syncBrowserViewBounds)
+      : null
+
+    if (panelElement) observer?.observe(panelElement)
+    window.addEventListener('resize', syncBrowserViewBounds)
+
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', syncBrowserViewBounds)
+    }
   }, [panel, showSuggest, favFolderOpen, favDropOpen, favContext, showBookmarkSave, favRename])
 
 
@@ -1999,7 +2010,7 @@ export default function BrowserPage() {
 
         {/* Side panel */}
         {panel && (
-          <div className="side-panel">
+          <div className={`side-panel ${panel === 'settings' ? 'settings-side-panel' : ''}`}>
             {panel === 'wallet'    && <WalletPanel    onClose={() => setPanel(null)} />}
             {panel === 'nostr'     && <NostrPanel     onClose={() => setPanel(null)} />}
             {panel === 'favorites' && <FavoritesPanel onClose={() => setPanel(null)} onNavigate={handleNavigate} onOpenNewTab={handleNewTab} currentUrl={activeTab?.url||''} currentTitle={activeTab?.title||''} />}
