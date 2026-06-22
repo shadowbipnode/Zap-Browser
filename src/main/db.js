@@ -24,10 +24,6 @@ function init() {
       last_used_at INTEGER NOT NULL
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_profiles_default
-      ON browser_profiles(is_default)
-      WHERE is_default=1;
-
     CREATE TABLE IF NOT EXISTS browser_profile_state (
       id                INTEGER PRIMARY KEY CHECK (id=1),
       active_profile_id TEXT NOT NULL REFERENCES browser_profiles(id)
@@ -143,78 +139,200 @@ function init() {
     );
   `)
 
-  try { db.prepare('ALTER TABLE favorites ADD COLUMN parent_id INTEGER').run() } catch (_) {}
-  try { db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
-  try { db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
-
-  // Legacy bookmarks migration:
-  // Older Zap Browser versions stored bookmarks directly at root without a
-  // dedicated bookmarks bar folder. Create the root folder and move legacy
-  // root items into it once.
-  try {
-    const bar = db
-      .prepare("SELECT id FROM favorites WHERE is_folder=1 AND lower(title) IN ('bookmarks bar', 'barra dei preferiti') LIMIT 1")
-      .get()
-
-    if (!bar) {
-      const info = db
-        .prepare("INSERT INTO favorites(title,url,favicon,parent_id,is_folder,sort_order,created_at) VALUES(?,?,?,?,?,?,?)")
-        .run('Bookmarks bar', '', null, null, 1, 0, Date.now())
-
-      const barId = info.lastInsertRowid
-
-      db.prepare(`
-        UPDATE favorites
-        SET parent_id = ?
-        WHERE parent_id IS NULL
-          AND id != ?
-      `).run(barId, barId)
-    }
-  } catch (_) {}
-
-
-migrateBrowserProfiles()
-migrateNwcConnectionsSchema()
-migratePrivacySettingsSchema()
-migrateNostrProfilesSchema()
-migrateNostrPermissionsSchema()
+  migrateBrowserProfiles()
+  migrateBookmarksSchema()
+  migrateNwcConnectionsSchema()
+  migratePrivacySettingsSchema()
+  migrateNostrProfilesSchema()
+  migrateNostrPermissionsSchema()
 }
 
 function migrateBrowserProfiles() {
   const ts = now()
 
-  db.prepare(`
-    INSERT OR IGNORE INTO browser_profiles
-      (id, name, is_default, created_at, updated_at, last_used_at)
-    VALUES ('default', 'Default', 1, ?, ?, ?)
-  `).run(ts, ts, ts)
-
-  const active = db.prepare(`
-    SELECT active_profile_id
-    FROM browser_profile_state
-    WHERE id=1
-  `).get()
-
-  if (!active) {
+  db.transaction(() => {
+    db.exec('DROP INDEX IF EXISTS idx_browser_profiles_default')
     db.prepare(`
-      INSERT INTO browser_profile_state(id, active_profile_id)
-      VALUES (1, 'default')
+      INSERT OR IGNORE INTO browser_profiles
+        (id, name, is_default, created_at, updated_at, last_used_at)
+      VALUES ('default', 'Default', 1, ?, ?, ?)
+    `).run(ts, ts, ts)
+
+    db.prepare(`
+      UPDATE browser_profiles
+      SET is_default = CASE WHEN id='default' THEN 1 ELSE 0 END
     `).run()
-    return
+
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_profiles_default
+      ON browser_profiles(is_default)
+      WHERE is_default=1
+    `)
+
+    const active = db.prepare(`
+      SELECT active_profile_id
+      FROM browser_profile_state
+      WHERE id=1
+    `).get()
+    const activeExists = active && db.prepare(`
+      SELECT 1
+      FROM browser_profiles
+      WHERE id=?
+    `).get(active.active_profile_id)
+
+    if (!active) {
+      db.prepare(`
+        INSERT INTO browser_profile_state(id, active_profile_id)
+        VALUES (1, 'default')
+      `).run()
+    } else if (!activeExists) {
+      db.prepare(`
+        UPDATE browser_profile_state
+        SET active_profile_id='default'
+        WHERE id=1
+      `).run()
+    }
+  })()
+}
+
+function migrateBookmarksSchema() {
+  const originalColumns = new Set(
+    db.prepare('PRAGMA table_info(favorites)').all().map(column => column.name)
+  )
+  const wasFlatSchema = !originalColumns.has('parent_id') && !originalColumns.has('is_folder')
+
+  if (!originalColumns.has('parent_id')) {
+    db.prepare('ALTER TABLE favorites ADD COLUMN parent_id INTEGER').run()
+  }
+  if (!originalColumns.has('is_folder')) {
+    db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run()
+  }
+  if (!originalColumns.has('sort_order')) {
+    db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER').run()
   }
 
-  const exists = db.prepare(`
-    SELECT id
-    FROM browser_profiles
-    WHERE id=?
-  `).get(active.active_profile_id)
+  db.transaction(() => {
+    db.prepare('UPDATE favorites SET is_folder=0 WHERE is_folder IS NULL').run()
 
-  if (!exists) {
+    let bar = db.prepare(`
+      SELECT id
+      FROM favorites
+      WHERE is_folder=1
+        AND lower(trim(title)) IN ('bookmarks bar', 'barra dei preferiti')
+      ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, id ASC
+      LIMIT 1
+    `).get()
+
+    if (!bar) {
+      const info = db.prepare(`
+        INSERT INTO favorites
+          (title, url, favicon, parent_id, is_folder, sort_order, created_at)
+        VALUES ('Bookmarks bar', '', NULL, NULL, 1, 0, ?)
+      `).run(now())
+      bar = { id: Number(info.lastInsertRowid) }
+    } else {
+      db.prepare('UPDATE favorites SET parent_id=NULL WHERE id=?').run(bar.id)
+    }
+
+    const barId = Number(bar.id)
+
+    if (wasFlatSchema) {
+      db.prepare(`
+        UPDATE favorites
+        SET parent_id=?
+        WHERE id != ?
+      `).run(barId, barId)
+    }
+
     db.prepare(`
-      UPDATE browser_profile_state
-      SET active_profile_id='default'
-      WHERE id=1
-    `).run()
+      UPDATE favorites
+      SET parent_id=?
+      WHERE parent_id IS NOT NULL
+        AND id != ?
+        AND (
+          parent_id=id
+          OR NOT EXISTS (
+            SELECT 1
+            FROM favorites parent
+            WHERE parent.id=favorites.parent_id
+              AND parent.is_folder=1
+          )
+        )
+    `).run(barId, barId)
+
+    repairFavoriteCycles(barId)
+    normalizeFavoriteSortOrder()
+  })()
+}
+
+function repairFavoriteCycles(barId) {
+  const rows = db.prepare(`
+    SELECT id, parent_id
+    FROM favorites
+    ORDER BY id ASC
+  `).all()
+  const parentById = new Map(rows.map(row => [
+    Number(row.id),
+    row.parent_id == null ? null : Number(row.parent_id),
+  ]))
+  const repaired = new Set()
+
+  for (const row of rows) {
+    const path = []
+    const positions = new Map()
+    let cursor = Number(row.id)
+
+    while (cursor != null && parentById.has(cursor)) {
+      if (positions.has(cursor)) {
+        const cycle = path.slice(positions.get(cursor))
+        const repairId = Math.min(...cycle)
+        const repairParent = repairId === barId ? null : barId
+        parentById.set(repairId, repairParent)
+        repaired.add(repairId)
+        break
+      }
+
+      positions.set(cursor, path.length)
+      path.push(cursor)
+      cursor = parentById.get(cursor)
+    }
+  }
+
+  const update = db.prepare('UPDATE favorites SET parent_id=? WHERE id=?')
+  for (const id of [...repaired].sort((a, b) => a - b)) {
+    update.run(parentById.get(id), id)
+  }
+}
+
+function normalizeFavoriteSortOrder() {
+  const parents = db.prepare(`
+    SELECT DISTINCT parent_id
+    FROM favorites
+    ORDER BY parent_id IS NOT NULL, parent_id ASC
+  `).all()
+  const selectRoot = db.prepare(`
+    SELECT id
+    FROM favorites
+    WHERE parent_id IS NULL
+    ORDER BY
+      CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END,
+      sort_order ASC,
+      id ASC
+  `)
+  const selectChildren = db.prepare(`
+    SELECT id
+    FROM favorites
+    WHERE parent_id=?
+    ORDER BY
+      CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END,
+      sort_order ASC,
+      id ASC
+  `)
+
+  for (const parent of parents) {
+    const parentId = parent.parent_id == null ? null : Number(parent.parent_id)
+    const siblings = parentId == null ? selectRoot.all() : selectChildren.all(parentId)
+    writeFavoriteOrder(parentId, siblings.map(row => Number(row.id)))
   }
 }
 
@@ -224,40 +342,56 @@ function migrateNostrPermissionsSchema() {
     .all()
     .map(c => c.name)
 
-  if (columns.includes('browser_profile_id')) return
-
   const ts = now()
 
+  if (!columns.includes('browser_profile_id')) {
+    db.transaction(() => {
+      db.exec('DROP TABLE IF EXISTS nostr_permissions_next')
+      db.exec(`
+        CREATE TABLE nostr_permissions_next (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          browser_profile_id TEXT    NOT NULL DEFAULT 'default' REFERENCES browser_profiles(id),
+          origin             TEXT    NOT NULL,
+          action             TEXT    NOT NULL,
+          decision           TEXT    NOT NULL,
+          created_at         INTEGER NOT NULL,
+          updated_at         INTEGER NOT NULL,
+          UNIQUE(browser_profile_id, origin, action)
+        )
+      `)
+
+      db.prepare(`
+        INSERT OR IGNORE INTO nostr_permissions_next
+          (browser_profile_id, origin, action, decision, created_at, updated_at)
+        SELECT
+          'default',
+          origin,
+          action,
+          decision,
+          COALESCE(created_at, ?),
+          COALESCE(updated_at, ?)
+        FROM nostr_permissions
+        ORDER BY id ASC
+      `).run(ts, ts)
+
+      db.exec('DROP TABLE nostr_permissions')
+      db.exec('ALTER TABLE nostr_permissions_next RENAME TO nostr_permissions')
+    })()
+  }
+
   db.transaction(() => {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS nostr_permissions_next (
-        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-        browser_profile_id TEXT    NOT NULL DEFAULT 'default' REFERENCES browser_profiles(id),
-        origin             TEXT    NOT NULL,
-        action             TEXT    NOT NULL,
-        decision           TEXT    NOT NULL,
-        created_at         INTEGER NOT NULL,
-        updated_at         INTEGER NOT NULL,
-        UNIQUE(browser_profile_id, origin, action)
-      )
-    `)
-
     db.prepare(`
-      INSERT OR IGNORE INTO nostr_permissions_next
-        (browser_profile_id, origin, action, decision, created_at, updated_at)
-      SELECT
-        'default',
-        origin,
-        action,
-        decision,
-        COALESCE(created_at, ?),
-        COALESCE(updated_at, ?)
-      FROM nostr_permissions
-      ORDER BY id ASC
-    `).run(ts, ts)
+      UPDATE nostr_permissions
+      SET browser_profile_id='default'
+      WHERE browser_profile_id IS NULL
+        OR browser_profile_id=''
+        OR NOT EXISTS (
+          SELECT 1
+          FROM browser_profiles
+          WHERE browser_profiles.id=nostr_permissions.browser_profile_id
+        )
+    `).run()
 
-    db.exec('DROP TABLE nostr_permissions')
-    db.exec('ALTER TABLE nostr_permissions_next RENAME TO nostr_permissions')
     db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_permissions_browser_profile_origin_action
       ON nostr_permissions(browser_profile_id, origin, action)
@@ -283,7 +417,17 @@ function migrateNostrProfilesSchema() {
     db.prepare("ALTER TABLE nostr_profile ADD COLUMN browser_profile_id TEXT NOT NULL DEFAULT 'default'").run()
   }
 
-  db.prepare("UPDATE nostr_profile SET browser_profile_id='default' WHERE browser_profile_id IS NULL OR browser_profile_id=''").run()
+  db.prepare(`
+    UPDATE nostr_profile
+    SET browser_profile_id='default'
+    WHERE browser_profile_id IS NULL
+      OR browser_profile_id=''
+      OR NOT EXISTS (
+        SELECT 1
+        FROM browser_profiles
+        WHERE browser_profiles.id=nostr_profile.browser_profile_id
+      )
+  `).run()
   db.exec(`
     UPDATE nostr_profile
     SET active=0
@@ -357,6 +501,7 @@ function migratePrivacySettingsSchema() {
     const legacyValue = (name, fallback) => columns.includes(name) ? name : fallback
 
     db.transaction(() => {
+      db.exec('DROP TABLE IF EXISTS privacy_settings_next')
       db.exec(`
         CREATE TABLE privacy_settings_next (
           browser_profile_id TEXT PRIMARY KEY REFERENCES browser_profiles(id) ON DELETE CASCADE,
@@ -403,7 +548,8 @@ function migratePrivacySettingsSchema() {
           ${legacyValue('popup_block', '1')},
           ${legacyValue('overlay_block', '1')}
         FROM privacy_settings
-        WHERE id=1
+        ORDER BY CASE WHEN id=1 THEN 0 ELSE 1 END, id ASC
+        LIMIT 1
       `)
 
       db.exec('DROP TABLE privacy_settings')
@@ -423,6 +569,18 @@ function migratePrivacySettingsSchema() {
   if (!columns.includes('overlay_block')) {
     db.prepare('ALTER TABLE privacy_settings ADD COLUMN overlay_block INTEGER NOT NULL DEFAULT 1').run()
   }
+
+  db.prepare(`
+    UPDATE privacy_settings
+    SET browser_profile_id='default'
+    WHERE browser_profile_id IS NULL
+      OR browser_profile_id=''
+      OR NOT EXISTS (
+        SELECT 1
+        FROM browser_profiles
+        WHERE browser_profiles.id=privacy_settings.browser_profile_id
+      )
+  `).run()
 
   db.exec(`
     INSERT OR IGNORE INTO privacy_settings(browser_profile_id)

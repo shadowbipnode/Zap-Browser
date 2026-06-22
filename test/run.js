@@ -5,6 +5,7 @@ const electronPath = require('electron')
 
 const result = spawnSync(electronPath, [
   '--test',
+  'test/migration-hardening.test.js',
   'test/profile-architecture.test.js',
   'test/bookmark-ordering.test.js',
 ], {
