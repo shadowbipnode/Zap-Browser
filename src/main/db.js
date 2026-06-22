@@ -650,6 +650,44 @@ function addFavorite({ title, url, favicon, parent_id = null, is_folder = 0, sor
     created_at: ts,
   }
 }
+
+function addFavoriteAt({ title, url, favicon, parent_id = null }, index = null) {
+  const targetParent = parent_id === null || parent_id === undefined ? null : Number(parent_id)
+
+  if (targetParent !== null) {
+    const parent = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(targetParent)
+    if (!parent || Number(parent.is_folder) !== 1) {
+      return { ok: false, error: 'Invalid target folder' }
+    }
+  }
+
+  const transaction = db.transaction(() => {
+    const siblings = getFavoriteSiblings(targetParent).map(row => Number(row.id))
+    const requestedIndex = index === null || index === undefined ? siblings.length : Number(index)
+    const targetIndex = Number.isFinite(requestedIndex)
+      ? Math.max(0, Math.min(siblings.length, Math.trunc(requestedIndex)))
+      : siblings.length
+    const created = addFavorite({
+      title,
+      url,
+      favicon,
+      parent_id: targetParent,
+      is_folder: 0,
+    })
+
+    siblings.splice(targetIndex, 0, Number(created.id))
+    writeFavoriteOrder(targetParent, siblings)
+
+    return {
+      ...created,
+      ok: true,
+      sort_order: targetIndex,
+    }
+  })
+
+  return transaction()
+}
+
 function removeFavorite(id) {
   const item = db.prepare(`
     SELECT id, parent_id, is_folder
@@ -847,7 +885,7 @@ module.exports = {
   getActiveBrowserProfile, getActiveBrowserProfileId, listBrowserProfiles, createBrowserProfile, renameBrowserProfile, setActiveBrowserProfile, getBrowserProfileById, deleteBrowserProfile,
   getPrivacy, setPrivacy,
   addDownload, getDownloads, clearDownloads,
-  getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,
+  getFavorites, addFavorite, addFavoriteAt, removeFavorite, updateFavoriteTitle, moveFavorite,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission, clearNostrPermissions,

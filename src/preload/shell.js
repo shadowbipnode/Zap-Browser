@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('zap', {
   // Favorites
   getFavorites:        () => ipcRenderer.invoke('get-favorites'),
   addFavorite:         (a) => ipcRenderer.invoke('add-favorite', a),
+  addFavoriteAt:       (a) => ipcRenderer.invoke('add-favorite-at', a),
   removeFavorite:      (a) => ipcRenderer.invoke('remove-favorite', a),
   renameFavorite:      (a) => ipcRenderer.invoke('rename-favorite', a),
   moveFavorite:        (a) => ipcRenderer.invoke('move-favorite', a),

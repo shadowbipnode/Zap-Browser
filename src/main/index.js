@@ -2862,6 +2862,25 @@ ipcMain.handle('add-favorite',    (_, args) => {
   if (args.favicon != null) V.assert(typeof args.favicon === 'string' && args.favicon.length <= 5000, 'Invalid favicon')
   return DB.addFavorite(args)
 })
+ipcMain.handle('add-favorite-at', (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid favorite payload')
+  V.assert(typeof args.url === 'string' && args.url.length > 0 && args.url.length <= 3000, 'Invalid URL')
+  V.assert(typeof args.title === 'string' && args.title.length <= 300, 'Invalid title')
+  if (args.favicon != null) V.assert(typeof args.favicon === 'string' && args.favicon.length <= 5000, 'Invalid favicon')
+  if (args.parent_id !== null && args.parent_id !== undefined) {
+    V.assert(Number.isSafeInteger(Number(args.parent_id)), 'Invalid parent folder id')
+  }
+  if (args.index !== null && args.index !== undefined) {
+    V.assert(Number.isSafeInteger(Number(args.index)) && Number(args.index) >= 0, 'Invalid favorite position')
+  }
+
+  return DB.addFavoriteAt({
+    title: args.title.trim() || args.url,
+    url: args.url,
+    favicon: args.favicon || null,
+    parent_id: args.parent_id === 'root' ? null : args.parent_id,
+  }, args.index === null || args.index === undefined ? null : Number(args.index))
+})
 ipcMain.handle('remove-favorite', (_, { id }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
   return DB.removeFavorite(id)

@@ -16,6 +16,34 @@ interface TabState {
   canGoBack?: boolean; canGoForward?: boolean
 }
 
+const CURRENT_PAGE_DRAG_TYPE = 'application/x-zap-current-page'
+
+interface CurrentPageDrag {
+  url: string
+  title: string
+  favicon?: string
+}
+
+function readCurrentPageDrag(dataTransfer: DataTransfer): CurrentPageDrag | null {
+  try {
+    const raw = dataTransfer.getData(CURRENT_PAGE_DRAG_TYPE)
+    if (!raw) return null
+    const page = JSON.parse(raw)
+    if (!page || typeof page.url !== 'string' || !page.url) return null
+    return {
+      url: page.url,
+      title: typeof page.title === 'string' && page.title ? page.title : page.url,
+      favicon: typeof page.favicon === 'string' && page.favicon ? page.favicon : undefined,
+    }
+  } catch (_) {
+    return null
+  }
+}
+
+function hasCurrentPageDrag(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types || []).includes(CURRENT_PAGE_DRAG_TYPE)
+}
+
 export default function BrowserPage() {
   const { L } = useLang()
   const { tabs, activeId, addTab, closeTab, setActive, reorderTabs, updateTab, navigate, resetTabs } = useBrowser()
@@ -34,6 +62,7 @@ export default function BrowserPage() {
   const [favRename, setFavRename] = useState<any>(null)
   const [favRenameValue, setFavRenameValue] = useState('')
   const [dragFavoriteId, setDragFavoriteId] = useState<number | null>(null)
+  const [dragCurrentPage, setDragCurrentPage] = useState(false)
   const [favoriteDrop, setFavoriteDrop] = useState<{ id: number | 'bar'; position: 'before' | 'after' | 'inside' } | null>(null)
   const [showBookmarkSave, setShowBookmarkSave] = useState(false)
   const [bookmarkFolder, setBookmarkFolder] = useState<string>('root')
@@ -64,6 +93,7 @@ export default function BrowserPage() {
   const [findOpen, setFindOpen] = useState(false)
   const [findText, setFindText] = useState('')
   const findInputRef = useRef<HTMLInputElement | null>(null)
+  const suppressIdentityClickRef = useRef(false)
 
 
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
@@ -991,11 +1021,46 @@ export default function BrowserPage() {
         }}>
           <button
             title="Site permissions"
-            onClick={openSitePermissions}
+            draggable={!isNew}
+            onDragStart={(e) => {
+              if (!activeTab?.url || isNew) {
+                e.preventDefault()
+                return
+              }
+
+              const page: CurrentPageDrag = {
+                url: activeTab.url,
+                title: activeTab.title || activeTab.url,
+                favicon: activeTab.favicon,
+              }
+
+              suppressIdentityClickRef.current = true
+              setDragCurrentPage(true)
+              e.dataTransfer.effectAllowed = 'copy'
+              e.dataTransfer.setData(CURRENT_PAGE_DRAG_TYPE, JSON.stringify(page))
+              e.dataTransfer.setData('text/uri-list', page.url)
+              e.dataTransfer.setData('text/plain', page.url)
+            }}
+            onDragEnd={() => {
+              setDragCurrentPage(false)
+              setFavoriteDrop(null)
+              window.setTimeout(() => {
+                suppressIdentityClickRef.current = false
+              }, 0)
+            }}
+            onClick={(e) => {
+              if (suppressIdentityClickRef.current) {
+                e.preventDefault()
+                e.stopPropagation()
+                return
+              }
+              openSitePermissions()
+            }}
+            className={dragCurrentPage ? 'page-identity-button dragging' : 'page-identity-button'}
             style={{
               background:'none',
               border:'none',
-              cursor:'pointer',
+              cursor: isNew ? 'pointer' : 'grab',
               color:'var(--t2)',
               fontSize:14,
               padding:0,
@@ -1507,7 +1572,45 @@ export default function BrowserPage() {
           setFavoriteDrop(null)
         }
 
-        const dropOnBarItem = async (target: any, position: 'before' | 'after' | 'inside') => {
+        const addDraggedPage = async (page: CurrentPageDrag, parentId: number | null, index: number) => {
+          const result = await window.zap?.addFavoriteAt?.({
+            title: page.title || page.url,
+            url: page.url,
+            favicon: page.favicon || null,
+            parent_id: parentId,
+            index,
+          })
+
+          if (result?.ok === false) {
+            window.alert(result.error || 'Could not create bookmark')
+          } else {
+            await refreshFavorites()
+          }
+
+          setDragCurrentPage(false)
+          setFavoriteDrop(null)
+        }
+
+        const dropOnBarItem = async (
+          target: any,
+          position: 'before' | 'after' | 'inside',
+          page: CurrentPageDrag | null,
+        ) => {
+          if (page) {
+            if (position === 'inside' && Number(target.is_folder) === 1) {
+              await addDraggedPage(page, Number(target.id), getChildren(target.id).length)
+              return
+            }
+
+            const targetIndex = barItems.findIndex((item:any) => Number(item.id) === Number(target.id))
+            await addDraggedPage(
+              page,
+              barRootId == null ? null : Number(barRootId),
+              Math.max(0, targetIndex + (position === 'after' ? 1 : 0)),
+            )
+            return
+          }
+
           if (dragFavoriteId == null || Number(target.id) === dragFavoriteId) return
 
           if (position === 'inside' && Number(target.is_folder) === 1) {
@@ -1628,14 +1731,25 @@ export default function BrowserPage() {
               setFavDropOpen(false)
             }}
             onDragOver={(e) => {
-              if (dragFavoriteId == null) return
+              const currentPage = dragCurrentPage || hasCurrentPageDrag(e.dataTransfer)
+              if (dragFavoriteId == null && !currentPage) return
               e.preventDefault()
-              e.dataTransfer.dropEffect = 'move'
+              e.dataTransfer.dropEffect = currentPage ? 'copy' : 'move'
               setFavoriteDrop({ id: 'bar', position: 'inside' })
             }}
             onDrop={async (e) => {
-              if (dragFavoriteId == null) return
+              const page = readCurrentPageDrag(e.dataTransfer)
+              if (dragFavoriteId == null && !page) return
               e.preventDefault()
+              e.stopPropagation()
+              if (page) {
+                await addDraggedPage(
+                  page,
+                  barRootId == null ? null : Number(barRootId),
+                  barItems.length,
+                )
+                return
+              }
               const siblings = barItems.filter((item:any) => Number(item.id) !== dragFavoriteId)
               await moveFavoriteTo(
                 dragFavoriteId,
@@ -1695,9 +1809,11 @@ export default function BrowserPage() {
                     setFavoriteDrop(null)
                   }}
                   onDragOver={(e) => {
-                    if (dragFavoriteId == null || dragFavoriteId === Number(f.id)) return
+                    const currentPage = dragCurrentPage || hasCurrentPageDrag(e.dataTransfer)
+                    if (!currentPage && (dragFavoriteId == null || dragFavoriteId === Number(f.id))) return
                     e.preventDefault()
                     e.stopPropagation()
+                    e.dataTransfer.dropEffect = currentPage ? 'copy' : 'move'
                     const rect = e.currentTarget.getBoundingClientRect()
                     const ratio = (e.clientX - rect.left) / Math.max(1, rect.width)
                     const position = isFolder && ratio > .3 && ratio < .7
@@ -1709,7 +1825,7 @@ export default function BrowserPage() {
                     e.preventDefault()
                     e.stopPropagation()
                     if (favoriteDrop?.id !== Number(f.id)) return
-                    await dropOnBarItem(f, favoriteDrop.position)
+                    await dropOnBarItem(f, favoriteDrop.position, readCurrentPageDrag(e.dataTransfer))
                   }}
                 >
                   <button
@@ -1743,7 +1859,9 @@ export default function BrowserPage() {
                     onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
                     onMouseLeave={e => (e.currentTarget.style.background='none')}
                   >
-                    {isFolder ? '📁' : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
+                    {isFolder ? '📁' : f.favicon ? (
+                      <img className="bookmark-favicon" src={f.favicon} alt="" draggable={false} />
+                    ) : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
                   </button>
 
 
