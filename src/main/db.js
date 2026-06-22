@@ -508,33 +508,67 @@ function getFavorites() {
     FROM favorites
     ORDER BY
       COALESCE(parent_id, 0),
-      is_folder DESC,
       sort_order ASC,
-      created_at DESC
+      id ASC
   `).all()
 }
-function addFavorite({ title, url, favicon, parent_id = null, is_folder = 0, sort_order = 0 }) {
+function getFavoriteSiblings(parentId, excludeId = null) {
+  const parentClause = parentId == null ? 'parent_id IS NULL' : 'parent_id=?'
+  const params = parentId == null ? [] : [parentId]
+  let sql = `
+    SELECT id
+    FROM favorites
+    WHERE ${parentClause}
+  `
+
+  if (excludeId != null) {
+    sql += ' AND id != ?'
+    params.push(excludeId)
+  }
+
+  sql += ' ORDER BY sort_order ASC, id ASC'
+  return db.prepare(sql).all(...params)
+}
+
+function writeFavoriteOrder(parentId, ids) {
+  const update = db.prepare('UPDATE favorites SET parent_id=?, sort_order=? WHERE id=?')
+  ids.forEach((id, index) => update.run(parentId, index, id))
+}
+
+function nextFavoriteSortOrder(parentId) {
+  const row = parentId == null
+    ? db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS value FROM favorites WHERE parent_id IS NULL').get()
+    : db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS value FROM favorites WHERE parent_id=?').get(parentId)
+
+  return Number(row?.value ?? -1) + 1
+}
+
+function addFavorite({ title, url, favicon, parent_id = null, is_folder = 0, sort_order }) {
   const ts = now()
   const safeUrl = is_folder ? '' : url
+  const targetParent = parent_id === null || parent_id === undefined ? null : Number(parent_id)
+  const targetOrder = Number.isFinite(Number(sort_order))
+    ? Number(sort_order)
+    : nextFavoriteSortOrder(targetParent)
 
   const r = db
     .prepare('INSERT INTO favorites(title,url,favicon,parent_id,is_folder,sort_order,created_at) VALUES(?,?,?,?,?,?,?)')
-    .run(title, safeUrl, favicon || null, parent_id, is_folder ? 1 : 0, sort_order || 0, ts)
+    .run(title, safeUrl, favicon || null, targetParent, is_folder ? 1 : 0, targetOrder, ts)
 
   return {
     id: r.lastInsertRowid,
     title,
     url: safeUrl,
     favicon: favicon || null,
-    parent_id,
+    parent_id: targetParent,
     is_folder: is_folder ? 1 : 0,
-    sort_order: sort_order || 0,
+    sort_order: targetOrder,
     created_at: ts,
   }
 }
 function removeFavorite(id) {
   const item = db.prepare(`
-    SELECT id, is_folder
+    SELECT id, parent_id, is_folder
     FROM favorites
     WHERE id=?
   `).get(id)
@@ -567,6 +601,7 @@ function removeFavorite(id) {
     `).run(id)
   }
 
+  writeFavoriteOrder(item.parent_id, getFavoriteSiblings(item.parent_id).map(row => row.id))
   return true
 }
 
@@ -575,14 +610,14 @@ function updateFavoriteTitle(id, title) {
   return { ok: true, id, title }
 }
 
-function moveFavorite(id, parent_id = null) {
-  const item = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(id)
+function moveFavorite(id, parent_id = null, index = null) {
+  const item = db.prepare('SELECT id, parent_id, is_folder FROM favorites WHERE id=?').get(id)
   if (!item) return { ok: false, error: 'Favorite not found' }
 
   const targetParent = parent_id === null || parent_id === undefined ? null : Number(parent_id)
 
   if (targetParent !== null) {
-    const parent = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(targetParent)
+    const parent = db.prepare('SELECT id, parent_id, is_folder FROM favorites WHERE id=?').get(targetParent)
 
     if (!parent || Number(parent.is_folder) !== 1) {
       return { ok: false, error: 'Invalid target folder' }
@@ -601,9 +636,30 @@ function moveFavorite(id, parent_id = null) {
     }
   }
 
-  db.prepare('UPDATE favorites SET parent_id=? WHERE id=?').run(targetParent, id)
+  const transaction = db.transaction(() => {
+    const sourceParent = item.parent_id == null ? null : Number(item.parent_id)
+    const sourceIds = getFavoriteSiblings(sourceParent, id).map(row => Number(row.id))
+    const targetIds = sourceParent === targetParent
+      ? sourceIds
+      : getFavoriteSiblings(targetParent, id).map(row => Number(row.id))
+    const requestedIndex = index === null || index === undefined
+      ? targetIds.length
+      : Number(index)
+    const targetIndex = Number.isFinite(requestedIndex)
+      ? Math.max(0, Math.min(targetIds.length, Math.trunc(requestedIndex)))
+      : targetIds.length
 
-  return { ok: true, id, parent_id: targetParent }
+    targetIds.splice(targetIndex, 0, Number(id))
+
+    if (sourceParent !== targetParent) writeFavoriteOrder(sourceParent, sourceIds)
+    writeFavoriteOrder(targetParent, targetIds)
+
+    return targetIndex
+  })
+
+  const sortOrder = transaction()
+
+  return { ok: true, id, parent_id: targetParent, sort_order: sortOrder }
 }
 
 // ── Cashu ─────────────────────────────────────────────────────────────────────

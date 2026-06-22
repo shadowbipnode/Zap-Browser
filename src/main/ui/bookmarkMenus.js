@@ -12,11 +12,26 @@ function showBookmarkContextMenu({
     return new Promise((resolve) => {
       const menu = Menu.buildFromTemplate([
         {
+          label: 'New Bookmark',
+          click: () => resolve('new-bookmark'),
+        },
+        {
           label: 'New Folder',
-          click: () => {
-            console.log('[DEBUG][main] New Folder selected')
-            resolve('new-folder')
-          },
+          click: () => resolve('new-folder'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Import Bookmarks',
+          click: () => resolve('import-bookmarks'),
+        },
+        {
+          label: 'Export Bookmarks',
+          click: () => resolve('export-bookmarks'),
+        },
+        { type: 'separator' },
+        {
+          label: 'Refresh',
+          click: () => resolve('refresh'),
         },
       ])
 

@@ -3,7 +3,11 @@
 const { spawnSync } = require('node:child_process')
 const electronPath = require('electron')
 
-const result = spawnSync(electronPath, ['--test', 'test/profile-architecture.test.js'], {
+const result = spawnSync(electronPath, [
+  '--test',
+  'test/profile-architecture.test.js',
+  'test/bookmark-ordering.test.js',
+], {
   cwd: process.cwd(),
   env: {
     ...process.env,

@@ -2795,14 +2795,21 @@ ipcMain.handle('rename-favorite', (_, { id, title }) => {
   return DB.updateFavoriteTitle(Number(id), title.trim())
 })
 
-ipcMain.handle('move-favorite', (_, { id, parent_id }) => {
+ipcMain.handle('move-favorite', (_, { id, parent_id, index }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
 
   if (parent_id !== null && parent_id !== undefined) {
     V.assert(Number.isSafeInteger(Number(parent_id)), 'Invalid parent folder id')
   }
+  if (index !== null && index !== undefined) {
+    V.assert(Number.isSafeInteger(Number(index)) && Number(index) >= 0, 'Invalid favorite position')
+  }
 
-  return DB.moveFavorite(Number(id), parent_id === 'root' ? null : parent_id)
+  return DB.moveFavorite(
+    Number(id),
+    parent_id === 'root' ? null : parent_id,
+    index === null || index === undefined ? null : Number(index),
+  )
 })
 
 ipcMain.handle('export-favorites-html', () => {
