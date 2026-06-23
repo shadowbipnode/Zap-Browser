@@ -93,12 +93,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Zap Browser"
-<<<<<<< HEAD
     },
     "portable": {
       "artifactName": "Zap-Browser-Portable-${version}-${arch}.${ext}"
-=======
->>>>>>> develop
     }
   },
   "dependencies": {
