@@ -1353,6 +1353,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800, minWidth: 900, minHeight: 600,
     frame: false, backgroundColor: '#0f0f12',
+    icon: path.join(__dirname, '../../assets/icons/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/shell.js'),
       contextIsolation: true,
@@ -1378,7 +1379,11 @@ function createWindow() {
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000')
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'))
+    const rendererIndex = app.isPackaged
+      ? path.join(app.getAppPath(), 'dist', 'index.html')
+      : path.join(__dirname, '../../dist/index.html')
+
+    mainWindow.loadFile(rendererIndex)
   }
 
   mainWindow.once('ready-to-show', () => {
