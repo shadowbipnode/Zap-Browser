@@ -10,6 +10,14 @@ interface Fav {
   sort_order?:number
 }
 
+interface ImportSource {
+  id:string
+  label:string
+  browser:string
+  profile?:string
+  type:string
+}
+
 interface Props {
   onClose:()=>void
   onNavigate:(url:string)=>void
@@ -31,8 +39,15 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
   const [manualOpen, setManualOpen] = useState(false)
   const [manualTitle, setManualTitle] = useState('')
   const [manualUrl, setManualUrl] = useState('')
+  const [importSources, setImportSources] = useState<ImportSource[]>([])
+  const [importingSource, setImportingSource] = useState<string|null>(null)
+  const [draggedId, setDraggedId] = useState<number|null>(null)
+  const [dropTarget, setDropTarget] = useState<{id:number|'root'; position:'before'|'after'|'inside'}|null>(null)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    detectImportSources()
+  }, [])
 
   useEffect(() => {
     const reload = () => load()
@@ -40,9 +55,20 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     return () => window.removeEventListener('favorites-updated', reload)
   }, [])
 
-  const load = () => {
-    ;(window as any).zap?.getFavorites().then((items: Fav[]) => setFavs(items || []))
-    window.dispatchEvent(new Event('favorites-updated'))
+  const load = (notify = false) => {
+    ;(window as any).zap?.getFavorites().then((items: Fav[]) => {
+      setFavs(items || [])
+      if (notify) window.dispatchEvent(new Event('favorites-updated'))
+    })
+  }
+
+  const detectImportSources = async () => {
+    try {
+      const sources = await (window as any).zap?.detectBookmarkImportSources?.()
+      setImportSources(Array.isArray(sources) ? sources : [])
+    } catch (_) {
+      setImportSources([])
+    }
   }
 
   const folderOptions = useMemo(() => {
@@ -60,12 +86,10 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     })
 
     Object.keys(map).forEach(k => {
-      map[k].sort((a:any,b:any) => {
-        const af = Number(a.is_folder) === 1 ? 0 : 1
-        const bf = Number(b.is_folder) === 1 ? 0 : 1
-        if (af !== bf) return af - bf
-        return Number(a.sort_order || 0) - Number(b.sort_order || 0)
-      })
+      map[k].sort((a:any,b:any) =>
+        Number(a.sort_order || 0) - Number(b.sort_order || 0) ||
+        Number(a.id) - Number(b.id)
+      )
     })
 
     return map
@@ -86,7 +110,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
 
     setMsg('Preferito salvato')
     setTimeout(() => setMsg(''), 2000)
-    load()
+    load(true)
   }
 
   const saveManual = async () => {
@@ -108,7 +132,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     setManualTitle('')
     setManualUrl('')
     setManualOpen(false)
-    load()
+    load(true)
   }
 
   const createFolder = async () => {
@@ -143,11 +167,30 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
       const text = await file.text()
       const imported = await (window as any).zap?.importFavoritesHtml({ html: text })
 
-      setMsg(`Importati ${imported?.length || 0} preferiti`)
+      setMsg(`Imported ${imported?.importedBookmarks || 0} bookmarks, skipped ${imported?.skippedDuplicates || 0} duplicates`)
       setTimeout(() => setMsg(''), 3000)
-      load()
+      load(true)
     }
     input.click()
+  }
+
+  const importFromBrowser = async (source: ImportSource) => {
+    setImportingSource(source.id)
+    try {
+      const res = await (window as any).zap?.importBookmarksFromBrowser?.({ sourceId: source.id })
+
+      if (res?.ok === false) {
+        setMsg(res.error || 'Import skipped')
+      } else {
+        setMsg(`Imported ${res?.importedBookmarks || 0} bookmarks from ${source.label}, skipped ${res?.skippedDuplicates || 0} duplicates`)
+        load(true)
+      }
+    } catch (err:any) {
+      setMsg(err?.message || 'Import failed')
+    } finally {
+      setImportingSource(null)
+      setTimeout(() => setMsg(''), 4000)
+    }
   }
 
   const exportHTML = async () => {
@@ -181,7 +224,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
     if (!ok) return
 
     await (window as any).zap?.removeFavorite({ id: f.id })
-    load()
+    load(true)
   }
 
   const rename = async () => {
@@ -194,7 +237,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
 
     setRenamingItem(null)
     setRenameValue('')
-    load()
+    load(true)
   }
 
   const move = async () => {
@@ -213,7 +256,7 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
 
     setMovingItem(null)
     setMoveTarget('root')
-    load()
+    load(true)
   }
 
   const openBookmark = (f: Fav) => {
@@ -235,6 +278,41 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
       String(f.url || '').toLowerCase().includes(q)
   }
 
+  const moveDraggedItem = async (parentId:number|null, index:number) => {
+    if (draggedId == null) return
+
+    const result = await (window as any).zap?.moveFavorite({
+      id: draggedId,
+      parent_id: parentId,
+      index,
+    })
+
+    if (result?.ok === false) {
+      setMsg(result.error || 'Move failed')
+      setTimeout(() => setMsg(''), 3000)
+    } else {
+      load(true)
+    }
+
+    setDraggedId(null)
+    setDropTarget(null)
+  }
+
+  const dropOnItem = async (target:Fav, position:'before'|'after'|'inside') => {
+    if (draggedId == null || draggedId === target.id) return
+
+    if (position === 'inside' && Number(target.is_folder) === 1) {
+      const children = (byParent[String(target.id)] || []).filter(item => item.id !== draggedId)
+      await moveDraggedItem(target.id, children.length)
+      return
+    }
+
+    const parentId = target.parent_id == null ? null : Number(target.parent_id)
+    const siblings = (byParent[String(parentId ?? 'root')] || []).filter(item => item.id !== draggedId)
+    const targetIndex = siblings.findIndex(item => item.id === target.id)
+    await moveDraggedItem(parentId, Math.max(0, targetIndex + (position === 'after' ? 1 : 0)))
+  }
+
   const renderItems = (parentId:any, depth = 0): any[] => {
     const key = String(parentId ?? 'root')
     return (byParent[key] || []).flatMap((f: Fav) => {
@@ -247,7 +325,38 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
       return [
         <div
           key={f.id}
-          className="fav-item"
+          className={[
+            'fav-item',
+            draggedId === f.id ? 'dragging' : '',
+            dropTarget?.id === f.id ? `drop-${dropTarget.position}` : '',
+          ].filter(Boolean).join(' ')}
+          draggable
+          onDragStart={(e) => {
+            setDraggedId(f.id)
+            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.setData('application/x-zap-favorite', String(f.id))
+          }}
+          onDragEnd={() => {
+            setDraggedId(null)
+            setDropTarget(null)
+          }}
+          onDragOver={(e) => {
+            if (draggedId == null || draggedId === f.id) return
+            e.preventDefault()
+            e.stopPropagation()
+            const rect = e.currentTarget.getBoundingClientRect()
+            const ratio = (e.clientY - rect.top) / Math.max(1, rect.height)
+            const position = isFolder && ratio > .25 && ratio < .75
+              ? 'inside'
+              : ratio < .5 ? 'before' : 'after'
+            setDropTarget({ id: f.id, position })
+          }}
+          onDrop={async (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (dropTarget?.id !== f.id) return
+            await dropOnItem(f, dropTarget.position)
+          }}
           onContextMenu={(e) => openContext(e, f)}
           onMouseDownCapture={(e) => {
             if (!isFolder && e.button === 1) {
@@ -349,6 +458,36 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
           )}
         </div>
 
+        <div style={{padding:12,background:'var(--bg-3)',border:'1px solid var(--b0)',borderRadius:'var(--r-md)',marginBottom:12}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:800}}>Import from installed browsers</div>
+            <button className="act-btn" onClick={detectImportSources}>Refresh</button>
+          </div>
+
+          {importSources.length > 0 ? (
+            <div style={{display:'grid',gap:6}}>
+              {importSources.map(source => (
+                <button
+                  key={source.id}
+                  className="act-btn"
+                  disabled={importingSource === source.id}
+                  onClick={() => importFromBrowser(source)}
+                  style={{justifyContent:'space-between',display:'flex',alignItems:'center'}}
+                >
+                  <span>{source.label}</span>
+                  <span style={{color:'var(--t2)',fontSize:11}}>
+                    {importingSource === source.id ? 'Importing...' : 'Import'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{fontSize:12,color:'var(--t2)',lineHeight:1.45}}>
+              No supported installed browser profiles were detected on this system. You can still import bookmarks from an HTML file.
+            </div>
+          )}
+        </div>
+
         <div style={{display:'flex',gap:8,marginBottom:10}}>
           <input
             value={search}
@@ -356,8 +495,24 @@ export default function FavoritesPanel({ onClose, onNavigate, onOpenNewTab, curr
             placeholder="Search bookmarks..."
             style={{flex:1,padding:'8px 10px',borderRadius:'var(--r-md)',background:'var(--bg-2)',color:'var(--t0)',border:'1px solid var(--b1)',fontSize:12}}
           />
-          <button className="act-btn" onClick={importHTML}>Import</button>
+          <button className="act-btn" onClick={importHTML}>Import HTML</button>
           <button className="act-btn" onClick={exportHTML}>Export</button>
+        </div>
+
+        <div
+          className={`fav-root-drop ${dropTarget?.id === 'root' ? 'active' : ''}`}
+          onDragOver={(e) => {
+            if (draggedId == null) return
+            e.preventDefault()
+            setDropTarget({ id:'root', position:'inside' })
+          }}
+          onDrop={async (e) => {
+            e.preventDefault()
+            const siblings = (byParent.root || []).filter(item => item.id !== draggedId)
+            await moveDraggedItem(null, siblings.length)
+          }}
+        >
+          Move to root
         </div>
 
         <div className="fav-list">

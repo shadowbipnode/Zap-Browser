@@ -20,7 +20,17 @@ contextBridge.exposeInMainWorld('zap', {
   tabBack:     (a) => ipcRenderer.invoke('tab-go-back', a),
   tabForward:  (a) => ipcRenderer.invoke('tab-go-forward', a),
   tabReload:   (a) => ipcRenderer.invoke('tab-reload', a),
+  tabFind:     (a) => ipcRenderer.invoke('tab-find', a),
+  tabStopFind: (a) => ipcRenderer.invoke('tab-stop-find', a),
   shellResize: (a) => ipcRenderer.invoke('shell-resize', a),
+
+  // Browser profiles
+  browserProfileActive: () => ipcRenderer.invoke('browser-profile-active'),
+  browserProfileList: () => ipcRenderer.invoke('browser-profile-list'),
+  browserProfileCreate: (a) => ipcRenderer.invoke('browser-profile-create', a),
+  browserProfileRename: (a) => ipcRenderer.invoke('browser-profile-rename', a),
+  browserProfileSetActive: (a) => ipcRenderer.invoke('browser-profile-set-active', a),
+  browserProfileDelete: (a) => ipcRenderer.invoke('browser-profile-delete', a),
 
   // Privacy
   getPrivacy:       () => ipcRenderer.invoke('get-privacy'),
@@ -85,10 +95,13 @@ contextBridge.exposeInMainWorld('zap', {
   // Favorites
   getFavorites:        () => ipcRenderer.invoke('get-favorites'),
   addFavorite:         (a) => ipcRenderer.invoke('add-favorite', a),
+  addFavoriteAt:       (a) => ipcRenderer.invoke('add-favorite-at', a),
   removeFavorite:      (a) => ipcRenderer.invoke('remove-favorite', a),
   renameFavorite:      (a) => ipcRenderer.invoke('rename-favorite', a),
   moveFavorite:        (a) => ipcRenderer.invoke('move-favorite', a),
   importFavoritesHtml: (a) => ipcRenderer.invoke('import-favorites-html', a),
+  detectBookmarkImportSources: () => ipcRenderer.invoke('detect-bookmark-import-sources'),
+  importBookmarksFromBrowser: (a) => ipcRenderer.invoke('import-bookmarks-from-browser', a),
   exportFavoritesHtml: () => ipcRenderer.invoke('export-favorites-html'),
 
   // Cashu
@@ -138,14 +151,20 @@ contextBridge.exposeInMainWorld('zap', {
       'bookmark-new-folder-request',
       'bookmark-create-folder-request',
       'ua-mode-updated',
+      'privacy-updated',
       'bookmark-folder-picked',
     ]
-    if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => {
+    if (!allowed.includes(channel)) return undefined
+
+    const listener = (_, data) => {
       if (channel === 'bookmark-create-folder-request') {
         console.log('[DEBUG][preload] event received:', channel, data)
       }
       cb(data)
-    })
+    }
+
+    ipcRenderer.on(channel, listener)
+    return () => ipcRenderer.removeListener(channel, listener)
   },
   off: (channel, cb) => ipcRenderer.removeListener(channel, cb),
 })

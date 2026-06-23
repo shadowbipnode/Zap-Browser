@@ -30,6 +30,7 @@ interface Store {
   reorderTabs: (fromId: string, toId: string) => void
   updateTab: (id: string, p: Partial<Tab>) => void
   navigate: (url: string) => void
+  resetTabs: (id?: string) => Tab
 }
 
 export const useBrowser = create<Store>((set, get) => ({
@@ -75,5 +76,11 @@ export const useBrowser = create<Store>((set, get) => ({
   navigate: (url) => {
     const { activeId, updateTab } = get()
     if (activeId) updateTab(activeId, { url, loading: true })
+  },
+
+  resetTabs: (id) => {
+    const tab = makeTab('zap://newtab', id)
+    set({ tabs: [tab], activeId: tab.id })
+    return tab
   },
 }))

@@ -2,12 +2,16 @@
 const { app, BrowserWindow, BrowserView, ipcMain, session, dialog, shell, Notification } = require('electron')
 const portable = require('./portable')
 const path   = require('path')
+const fs     = require('fs')
+const os     = require('os')
+const crypto = require('crypto')
 const DB     = require('./db')
 const wallet = require('./wallet')
 const nostr  = require('./nostr')
 const nwc    = require('./nwc')
 const bl     = require('./blocklist')
 const cosmetic = require('./cosmetic')
+const overlayProtection = require('./overlayProtection')
 const doh    = require('./doh')
 const v4v    = require('./value4value')
 const cashu  = require('./cashu')
@@ -24,6 +28,7 @@ const {
 const {
   setupWebViewContextMenu,
 } = require('./ui/nativeMenus')
+const profileContext = require('./browser/profileContext')
 
 const {
   showBookmarkContextMenu,
@@ -94,11 +99,18 @@ let activeView  = null
 const tabViews  = new Map()
 const tabUrls   = new Map()
 const tabMeta   = new Map()
+const tabErrorPages = new Map()
 let activeTabId = null
 let navigationOwnerTabId = null
 let isSwitching = false
+let shellLayout = { panelWidth: 0 }
 const activeDownloads = new Map()
 const lastTabUpdates = new Map()
+const configuredSessions = new Set()
+const configuredSessionProfileIds = new Map()
+const privacySessions = new Set()
+const downloadSessions = new Set()
+const webContentsProfileIds = new Map()
 
 const FINGERPRINT_PROFILES = [
   {
@@ -168,6 +180,74 @@ const UA_POOL = [
 let currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
 const nostrSessionPermissions = new Map()
 
+function getActiveBrowserProfile() {
+  return DB.getActiveBrowserProfile() || { id: 'default', name: 'Default', is_default: 1 }
+}
+
+function getBrowserProfileForTab(tabId) {
+  const meta = tabMeta.get(tabId) || {}
+  return DB.getBrowserProfileById(meta.profileId) || getActiveBrowserProfile()
+}
+
+function getProfileSession(profile) {
+  return profileContext.getPersistentSession(session, profile?.id)
+}
+
+function getPrivateSession(profile, tabId) {
+  return profileContext.getPrivateSession(session, profile?.id, tabId)
+}
+
+function getBrowserProfileIdForSession(ses) {
+  return configuredSessionProfileIds.get(ses) || 'default'
+}
+
+function getPrivacyForSession(ses) {
+  return DB.getPrivacy(getBrowserProfileIdForSession(ses))
+}
+
+function setUserAgentForSession(ses) {
+  const priv = getPrivacyForSession(ses)
+  ses.setUserAgent(priv?.ua_mode === 'default' ? '' : currentUA)
+}
+
+function setUserAgentForConfiguredSessions() {
+  for (const ses of configuredSessions) {
+    try { setUserAgentForSession(ses) } catch (_) {}
+  }
+}
+
+function configureBrowserSession(ses, profile = null) {
+  if (!ses) return ses
+
+  configuredSessions.add(ses)
+  configuredSessionProfileIds.set(ses, profile?.id || getBrowserProfileIdForSession(ses))
+  setUserAgentForSession(ses)
+  setupPrivacy(ses)
+  setupDownloads(ses)
+  applyProxyToSession(ses).catch(() => {})
+
+  return ses
+}
+
+function forgetBrowserProfileSessions(profileId) {
+  for (const [ses, configuredProfileId] of configuredSessionProfileIds.entries()) {
+    if (configuredProfileId !== profileId) continue
+    configuredSessionProfileIds.delete(ses)
+    configuredSessions.delete(ses)
+    privacySessions.delete(ses)
+    downloadSessions.delete(ses)
+  }
+}
+
+function getTabSession(tabId, isPrivate = false, profile = null) {
+  const targetProfile = profile || getBrowserProfileForTab(tabId)
+  const ses = isPrivate
+    ? getPrivateSession(targetProfile, tabId)
+    : getProfileSession(targetProfile)
+
+  return configureBrowserSession(ses, targetProfile)
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -175,6 +255,116 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
+}
+
+function makeNavigationErrorHtml({ url, errorCode, errorDescription }) {
+  const safeUrl = escapeHtml(url || '')
+  const safeDescription = escapeHtml(errorDescription || 'Navigation failed')
+  const safeCode = escapeHtml(errorCode)
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Page unavailable</title>
+<style>
+  :root {
+    color-scheme: dark;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f1117;
+    color: #f4f4f5;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 15% 10%, rgba(245,166,35,.11), transparent 28rem),
+      #0f1117;
+  }
+  main {
+    width: min(680px, calc(100vw - 48px));
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 12px;
+    background: rgba(21,23,32,.92);
+    box-shadow: 0 24px 70px rgba(0,0,0,.45);
+    padding: 28px;
+  }
+  h1 { margin: 0 0 10px; font-size: 24px; line-height: 1.2; }
+  p { margin: 0 0 16px; color: #a1a1aa; line-height: 1.5; }
+  code {
+    display: block;
+    margin: 14px 0 18px;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+    background: rgba(255,255,255,.06);
+    color: #fbbf24;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    height: 34px;
+    border: 1px solid rgba(245,166,35,.55);
+    border-radius: 8px;
+    background: rgba(245,166,35,.16);
+    color: #fbbf24;
+    font-weight: 800;
+    cursor: pointer;
+    padding: 0 14px;
+  }
+  button.secondary {
+    border-color: rgba(255,255,255,.16);
+    background: rgba(255,255,255,.06);
+    color: #e4e4e7;
+  }
+</style>
+</head>
+<body>
+  <main>
+    <h1>This page could not be loaded</h1>
+    <p>The main frame failed before a page could render. You can retry, edit the address bar, or navigate somewhere else.</p>
+    <code>${safeDescription} (${safeCode})<br>${safeUrl}</code>
+    <div class="actions">
+      <button onclick="location.href=${escapeHtml(JSON.stringify(url || ''))}">Retry</button>
+      <button class="secondary" onclick="history.back()">Back</button>
+    </div>
+  </main>
+</body>
+</html>`
+}
+
+function isNavigationErrorPageUrl(url) {
+  return typeof url === 'string' && url.startsWith('data:text/html;charset=utf-8,')
+}
+
+function showNavigationErrorPage(view, tabId, url, errorCode, errorDescription) {
+  if (!view || view.webContents.isDestroyed() || !tabId || !url || isNavigationErrorPageUrl(url)) return
+
+  tabUrls.set(tabId, url)
+  tabErrorPages.set(tabId, {
+    url,
+    errorCode,
+    errorDescription,
+  })
+
+  sendTabUpdated(tabId, {
+    loading: false,
+    url,
+    title: errorDescription || 'Page unavailable',
+    canGoBack: view.webContents.canGoBack(),
+    canGoForward: view.webContents.canGoForward(),
+  })
+
+  if (navigationOwnerTabId === tabId) {
+    navigationOwnerTabId = null
+  }
+
+  const html = makeNavigationErrorHtml({ url, errorCode, errorDescription })
+  view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {})
 }
 
 function hideAddressSuggestions() {
@@ -372,6 +562,60 @@ function getIpcOrigin(ipcEvent) {
   }
 }
 
+function getIpcBrowserProfileId(ipcEvent) {
+  const senderId = ipcEvent.sender?.id
+  if (senderId && webContentsProfileIds.has(senderId)) {
+    return webContentsProfileIds.get(senderId)
+  }
+
+  for (const [tabId, view] of tabViews.entries()) {
+    if (view?.webContents?.id === senderId) {
+      const profileId = getBrowserProfileForTab(tabId).id
+      webContentsProfileIds.set(senderId, profileId)
+      return profileId
+    }
+  }
+
+  return getActiveBrowserProfile().id
+}
+
+async function disposeTab(tabId) {
+  tabUrls.delete(tabId)
+  tabErrorPages.delete(tabId)
+  lastTabUpdates.delete(tabId)
+
+  const meta = tabMeta.get(tabId) || {}
+  tabMeta.delete(tabId)
+
+  const view = tabViews.get(tabId)
+  if (view) {
+    try { hideView(mainWindow, view) } catch (_) {}
+
+    if (meta.private) {
+      try { await profileContext.clearSessionStorage(view.webContents.session) } catch (_) {}
+    }
+
+    try { webContentsProfileIds.delete(view.webContents.id) } catch (_) {}
+    try { view.webContents.destroy() } catch (_) {}
+    tabViews.delete(tabId)
+  }
+
+  if (activeTabId === tabId) {
+    activeView = null
+    activeTabId = null
+  }
+}
+
+async function disposeAllTabs() {
+  for (const tabId of [...new Set([...tabMeta.keys(), ...tabViews.keys(), ...tabUrls.keys()])]) {
+    await disposeTab(tabId)
+  }
+
+  activeView = null
+  activeTabId = null
+  navigationOwnerTabId = null
+}
+
 function summarizeNostrEvent(event) {
   if (!event || typeof event !== 'object') {
     return 'Unknown event'
@@ -412,7 +656,8 @@ function summarizeNostrRequest(action, payload) {
 }
 async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
   const origin = getIpcOrigin(ipcEvent)
-  const key = `${origin}:${action}`
+  const browserProfileId = getIpcBrowserProfileId(ipcEvent)
+  const key = `${browserProfileId}:${origin}:${action}`
 
   const sessionDecision = nostrSessionPermissions.get(key)
 
@@ -424,7 +669,7 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
     return false
   }
 
-  const stored = DB.getNostrPermission(origin, action)
+  const stored = DB.getNostrPermission(origin, action, browserProfileId)
 
   if (stored?.decision === 'allow') {
     return true
@@ -458,12 +703,12 @@ async function confirmNostrPermission(ipcEvent, action, nostrEvent) {
   }
 
   if (result.response === 1) {
-    DB.setNostrPermission(origin, action, 'allow')
+    DB.setNostrPermission(origin, action, 'allow', browserProfileId)
     return true
   }
 
   if (result.response === 2) {
-    DB.setNostrPermission(origin, action, 'deny')
+    DB.setNostrPermission(origin, action, 'deny', browserProfileId)
     return false
   }
 
@@ -530,8 +775,8 @@ function parseNativePaymentUrl(rawUrl) {
   return null
 }
 
-function getTorProxyConfig() {
-  const priv = DB.getPrivacy()
+function getTorProxyConfig(browserProfileId = null) {
+  const priv = DB.getPrivacy(browserProfileId)
   const enabled = Number(priv?.tor_enabled) === 1
   const host = String(priv?.tor_host || '127.0.0.1').trim()
   const port = Number(priv?.tor_port || 9050)
@@ -561,7 +806,7 @@ function getTorProxyConfig() {
 }
 
 async function applyProxyToSession(ses) {
-  const tor = getTorProxyConfig()
+  const tor = getTorProxyConfig(getBrowserProfileIdForSession(ses))
 
   if (tor.error) return { ok: false, error: tor.error }
 
@@ -578,7 +823,15 @@ async function applyProxyToSession(ses) {
 }
 
 async function applyNetworkProxy() {
-  const result = await applyProxyToSession(session.defaultSession)
+  configuredSessions.add(session.defaultSession)
+
+  let result = await applyProxyToSession(session.defaultSession)
+
+  for (const ses of configuredSessions) {
+    try {
+      result = await applyProxyToSession(ses)
+    } catch (_) {}
+  }
 
   for (const view of tabViews.values()) {
     try {
@@ -701,17 +954,10 @@ function injectAntiFingerprint(view) {
 }
 
 
-function createMainView(tabId = null, isPrivate = false) {
+function createMainView(tabId = null, isPrivate = false, profile = null) {
   const viewTabId = tabId
-  const partition = isPrivate && tabId ? `zap-private-${tabId}` : undefined
-
-  const viewSession = partition ? session.fromPartition(partition) : session.defaultSession
-
-  setupPrivacy(viewSession)
-  setupDownloads(viewSession)
-
-  // Apply Tor/proxy policy also to isolated private sessions.
-  applyProxyToSession(viewSession).catch(() => {})
+  const viewProfile = profile || getBrowserProfileForTab(tabId)
+  const viewSession = getTabSession(tabId, isPrivate, viewProfile)
 
   const view = new BrowserView({
     webPreferences: {
@@ -722,6 +968,8 @@ function createMainView(tabId = null, isPrivate = false) {
       session: viewSession,
     }
   })
+
+  webContentsProfileIds.set(view.webContents.id, viewProfile.id)
 
   view.webContents.on('dom-ready', () => injectAntiFingerprint(view))
   view.webContents.on('did-finish-load', () => injectAntiFingerprint(view))
@@ -746,9 +994,12 @@ function createMainView(tabId = null, isPrivate = false) {
   view.webContents.on('did-navigate', async (_, url) => {
     const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
     if (!ownerTabId) return
+    tabErrorPages.delete(ownerTabId)
     tabUrls.set(ownerTabId, url)
     sendTabUpdated(ownerTabId, {
       url,
+      title: view.webContents.getTitle(),
+      loading: false,
       canGoBack: view.webContents.canGoBack(),
       canGoForward: view.webContents.canGoForward(),
     })
@@ -773,7 +1024,9 @@ function createMainView(tabId = null, isPrivate = false) {
     const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
     if (!ownerTabId) return
 
-    const url   = view.webContents.getURL()
+    const currentUrl = view.webContents.getURL()
+    const errorPage = tabErrorPages.get(ownerTabId)
+    const url   = errorPage && isNavigationErrorPageUrl(currentUrl) ? errorPage.url : currentUrl
     const title = view.webContents.getTitle()
 
     sendTabUpdated(ownerTabId, { loading: false, url, title })
@@ -782,6 +1035,27 @@ function createMainView(tabId = null, isPrivate = false) {
     if (!meta.private && url && !url.startsWith('chrome://') && !url.startsWith('devtools://')) {
       DB.addHistory(url, title)
     }
+
+    if (navigationOwnerTabId === ownerTabId) {
+      navigationOwnerTabId = null
+    }
+  })
+
+  view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return
+
+    const ownerTabId = viewTabId || navigationOwnerTabId || activeTabId
+    if (!ownerTabId) return
+
+    const failedUrl = validatedURL || view.webContents.getURL() || ''
+
+    try {
+      sendTabUpdated(ownerTabId, {
+        loading: false,
+        url: failedUrl,
+        title: errorDescription ? `Navigation error: ${errorDescription}` : 'Navigation error',
+      })
+    } catch (_) {}
 
     if (navigationOwnerTabId === ownerTabId) {
       navigationOwnerTabId = null
@@ -799,7 +1073,7 @@ function createMainView(tabId = null, isPrivate = false) {
       return { action: 'deny' }
     }
 
-    const priv = DB.getPrivacy()
+    const priv = DB.getPrivacy(viewProfile.id)
     if (!priv.adblock) {
       view.webContents.loadURL(url)
       return { action: 'deny' }
@@ -855,388 +1129,21 @@ function createMainView(tabId = null, isPrivate = false) {
   view.webContents.on('will-prevent-unload', (e) => e.preventDefault())
 
   function injectOverlayProtection() {
-    const priv = DB.getPrivacy()
-    if (!priv.adblock || !priv.popup_block || !priv.overlay_block) return
+    const priv = DB.getPrivacy(viewProfile.id)
+    if (!priv.adblock) return
 
     view.webContents.executeJavaScript(cosmetic.getCosmeticScript()).catch(() => {})
 
-    view.webContents.executeJavaScript(`
-      (function() {
-        function zapGenericCosmeticShields() {
-          if (document.getElementById('__zap_generic_cosmetic')) return;
-
-          const style = document.createElement('style');
-          style.id = '__zap_generic_cosmetic';
-          style.textContent = [
-            '[id*="div-gpt-ad"], [id*="google_ads_iframe"], [id*="google_ads"], [id*="gpt-ad"], [id*="adunit"], [class*="adunit"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle, [data-ad-slot], [data-ad-client], [data-google-query-id] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }',
-            'iframe[src*="googlesyndication"], iframe[src*="doubleclick"], iframe[src*="googleads"], iframe[src*="adservice"], iframe[src*="/ads/"], iframe[src*="prebid"] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }',
-            '[id*="PN-SKIN"], [id*="PN-INTRO"], [id*="PN-TOP"], [id*="PN-BANNER"], [id*="PN-MPU"], [id*="skin-ad"], [class*="skin-ad"], [id*="ad-skin"], [class*="ad-skin"] { display:none !important; visibility:hidden !important; height:0 !important; max-height:0 !important; overflow:hidden !important; }'
-          ].join('\\n');
-
-          document.documentElement.appendChild(style);
-
-          document.querySelectorAll('[id*="div-gpt-ad"], [id*="google_ads_iframe"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle, [data-ad-slot], [data-ad-client]').forEach(el => {
-            const wrap = el.closest('.ads-contrib, .adunit') || el;
-            wrap.remove();
-          });
-        }
-
-        function zapInjectAdCosmeticCSS() {
-          if (document.getElementById('__zap_ad_cosmetic')) return;
-
-          const style = document.createElement('style');
-          style.id = '__zap_ad_cosmetic';
-          style.textContent = [
-            'html, body { background-image: none !important; background-color: #fff !important; }',
-            '[id*="div-gpt-ad"], [id*="google_ads_iframe"], [id*="PN-SKIN"], [id*="PN-INTRO"], [id*="PN-TOP"], [id*="PN-BANNER"], [id*="PN-MASTHEAD"], [id*="PN-MPU"], .ads-contrib, .adunit, .adsbygoogle, ins.adsbygoogle { display: none !important; visibility: hidden !important; height: 0 !important; max-height: 0 !important; overflow: hidden !important; }'
-          ].join('\n');
-          document.documentElement.appendChild(style);
-        }
-
-        function zapKillAdSkins() {
-          zapInjectAdCosmeticCSS();
-          const skinSelectors = [
-            'body',
-            'html',
-            '[class*="skin"]',
-            '[id*="skin"]',
-            '[class*="wallpaper"]',
-            '[id*="wallpaper"]',
-            '[class*="background"]',
-            '[id*="background"]',
-            '[class*="masthead"]',
-            '[id*="masthead"]'
-          ];
-
-          for (const sel of skinSelectors) {
-            document.querySelectorAll(sel).forEach(el => {
-              const st = window.getComputedStyle(el);
-              const bg = st.backgroundImage || '';
-
-              if (
-                bg &&
-                bg !== 'none' &&
-                /(ad|adv|ads|banner|pubblic|sponsor|campaign|autoligure|volkswagen|promo|coop|ipercoop|buono|sconto|bmw|gino)/i.test(bg)
-              ) {
-                el.style.backgroundImage = 'none';
-                el.style.background = 'transparent';
-              }
-            // });
-          }
-        }
-
-        function zapHideBottomPromoBanners() {
-          const promoRegex = /(abbonati|abbonamento|offerta|promo|scopri di più|buono regalo|amazon|subscribe|subscription|limited offer|sponsor|advert)/i
-
-          document.querySelectorAll('body > div, body > section, body > aside').forEach(el => {
-            const st = window.getComputedStyle(el)
-            const r = el.getBoundingClientRect()
-            const txt = String(el.innerText || el.textContent || '').slice(0, 600)
-
-            const isFixedOrSticky =
-              st.position === 'fixed' ||
-              st.position === 'sticky'
-
-            const isBottomBanner =
-              isFixedOrSticky &&
-              r.width >= window.innerWidth * 0.55 &&
-              r.height >= 70 &&
-              r.height <= window.innerHeight * 0.38 &&
-              r.bottom >= window.innerHeight - 8
-
-            if (isBottomBanner && promoRegex.test(txt)) {
-              el.style.setProperty('display', 'none', 'important')
-              el.style.setProperty('visibility', 'hidden', 'important')
-              el.style.setProperty('height', '0px', 'important')
-              el.style.setProperty('max-height', '0px', 'important')
-              el.style.setProperty('overflow', 'hidden', 'important')
-            }
-          })
-        }
-
-        function zapKillAdElements() {
-          const adRegex = /(googlesyndication|doubleclick|googleads|adform|adnxs|criteo|taboola|outbrain|mgid|teads|smartadserver|openx|rubicon|yieldlove|prebid|adsbygoogle|pubblicit|sponsor)/i;
-
-          document.querySelectorAll('iframe, ins, .adsbygoogle, [data-ad-slot], [data-ad-client], [data-google-query-id]').forEach(el => {
-            const html = (
-              (el.id || '') + ' ' +
-              (el.className || '') + ' ' +
-              (el.getAttribute?.('src') || '') + ' ' +
-              (el.getAttribute?.('data-ad-slot') || '') + ' ' +
-              (el.getAttribute?.('data-ad-client') || '') + ' ' +
-              (el.getAttribute?.('data-google-query-id') || '')
-            );
-
-            if (adRegex.test(html) || el.tagName === 'IFRAME' || el.tagName === 'INS') {
-              el.style.setProperty('display', 'none', 'important');
-              el.style.setProperty('visibility', 'hidden', 'important');
-              el.style.setProperty('height', '0px', 'important');
-              el.style.setProperty('max-height', '0px', 'important');
-              el.style.setProperty('overflow', 'hidden', 'important');
-            }
-          });
-        }
-
-        function zapKillAdImagesAndLinks() {
-          const adTextRegex = /(pubblicit|advert|sponsor|promo|coupon|offerta|scopri|buono|sconto|coop|ipercoop|autoligure|volkswagen|bmw|gino|banner)/i;
-
-          document.querySelectorAll('a, img, picture, source, div, section, aside').forEach(el => {
-            if (zapLooksLikePaywall && zapLooksLikePaywall(el)) return;
-
-            const st = window.getComputedStyle(el);
-            const r = el.getBoundingClientRect();
-
-            if (r.width < 120 || r.height < 40) return;
-
-            const txt = [
-              el.innerText || '',
-              el.getAttribute?.('href') || '',
-              el.getAttribute?.('src') || '',
-              el.getAttribute?.('srcset') || '',
-              el.getAttribute?.('alt') || '',
-              el.getAttribute?.('title') || '',
-              el.id || '',
-              el.className || ''
-            ].join(' ');
-
-            const looksAd = adTextRegex.test(txt);
-            if (!looksAd) return;
-
-            const isTopBanner =
-              r.width >= window.innerWidth * 0.45 &&
-              r.height >= 80 &&
-              r.top <= 260;
-
-            const isSideSkin =
-              r.height >= window.innerHeight * 0.35 &&
-              r.width >= 120 &&
-              (r.left <= 80 || r.right >= window.innerWidth - 80);
-
-            const isLargeInlineAd =
-              r.width >= window.innerWidth * 0.35 &&
-              r.height >= 90;
-
-            if (isTopBanner || isSideSkin || isLargeInlineAd) {
-              el.style.setProperty('display', 'none', 'important');
-              el.style.setProperty('visibility', 'hidden', 'important');
-              el.style.setProperty('height', '0px', 'important');
-              el.style.setProperty('max-height', '0px', 'important');
-              el.style.setProperty('overflow', 'hidden', 'important');
-            }
-          });
-        }
-
-        function zapHasPaywallFramework() {
-          const html = document.documentElement.innerHTML.slice(0, 500000);
-
-          return /tinypass|piano|tp-backdrop|tp-active|paywall|subscription|abbonati|abbonamento/i.test(html);
-        }
-
-        function zapLooksLikePaywall(el) {
-          const txt = String(el.innerText || '').toLowerCase()
-          const html = String(el.outerHTML || '').toLowerCase()
-
-          return /tinypass|piano|tp-backdrop|tp-active|paywall|subscription|subscribe|abbonati|abbonamento|accedi|login/.test(html + ' ' + txt)
-        }
-
-        function zapLooksLikeAdOverlay(el) {
-          const txt = String(el.innerText || '').toLowerCase()
-          const html = String(el.outerHTML || '').toLowerCase()
-
-          if (zapLooksLikePaywall(el)) return false
-
-          return /pubblicit|advert|advertising|sponsor|sponsored|promo|coupon|offerta|limited|scopri di più|scopri come|buono|sconto|banner|adv|adsbygoogle|googlesyndication|doubleclick|amazon|coop|ipercoop|autoligure|volkswagen|bmw|fullscreen|skip intro|salta intro|entra nel sito/.test(html + ' ' + txt)
-        }
-
-        function zapKillAdOverlays() {
-          // document.querySelectorAll('body *').forEach(el => {
-            const st = window.getComputedStyle(el)
-            const r = el.getBoundingClientRect()
-
-            if (r.width < 120 || r.height < 50) return
-            if (!zapLooksLikeAdOverlay(el)) return
-
-            const z = parseInt(st.zIndex || '0', 10)
-
-            const isFixedOrSticky =
-              st.position === 'fixed' ||
-              st.position === 'sticky'
-
-            const isBigOverlay =
-              r.width >= window.innerWidth * 0.45 &&
-              r.height >= window.innerHeight * 0.18 &&
-              z >= 10
-
-            const isBottomBanner =
-              isFixedOrSticky &&
-              r.width >= window.innerWidth * 0.45 &&
-              r.bottom >= window.innerHeight - 20
-
-            const isSideRail =
-              r.height >= window.innerHeight * 0.45 &&
-              r.width >= 120 &&
-              (r.left <= 20 || r.right >= window.innerWidth - 20)
-
-            const isInterstitial =
-              r.width >= window.innerWidth * 0.45 &&
-              r.height >= window.innerHeight * 0.35 &&
-              z >= 10
-
-            if (isBigOverlay || isBottomBanner || isSideRail || isInterstitial) {
-              el.remove()
-            }
-          })
-
-          document.body.style.overflow = ''
-          document.documentElement.style.overflow = ''
-        }
-
-        function zapClickSkipIntro() {
-          document.querySelectorAll('a, button').forEach(el => {
-            const txt = String(el.innerText || el.textContent || '').toLowerCase()
-            const href = String(el.getAttribute?.('href') || '').toLowerCase()
-
-            if (
-              txt.includes('salta intro') ||
-              txt.includes('entra nel sito') ||
-              txt.includes('skip intro') ||
-              href.includes('noadv') ||
-              href.includes('skip')
-            ) {
-              el.click()
-            }
-          })
-        }
-
-        function zapKillAggressiveOverlays() {
-          zapGenericCosmeticShields();
-          zapClickSkipIntro();
-
-          // Precise GPT / Google Ads cleanup
-          document.querySelectorAll('[id*="div-gpt-ad"], [id*="google_ads_iframe"], .ads-contrib, .adunit').forEach(el => {
-            const wrap = el.closest('.ads-contrib') || el;
-            wrap.remove();
-          });
-
-          const hasPaywall = zapHasPaywallFramework();
-
-          // Disabled in Balanced Shields mode
-          // zapKillAdSkins();
-          zapKillAdElements();
-          zapHideBottomPromoBanners();
-          // Fully disabled in Balanced Shields v0.4
-
-          if (hasPaywall) {
-            // Balanced Shields: avoid global overflow reset
-            // Balanced Shields: avoid global overflow reset
-            return;
-          }
-
-          const selectors = [
-            
-            
-            
-            
-            
-            
-            '[class*="interstitial"]',
-            '[id*="interstitial"]',
-            '[class*="cookie"]',
-            '[id*="cookie"]',
-            '[class*="advert"]',
-            '[id*="advert"]',
-            
-            
-            '[class*="adv"]',
-            '[id*="adv"]',
-            '[class*="sponsor"]',
-            '[id*="sponsor"]'
-          ];
-
-          for (const sel of selectors) {
-            document.querySelectorAll(sel).forEach(el => {
-              const st = window.getComputedStyle(el);
-              const rect = el.getBoundingClientRect();
-
-              const z = parseInt(st.zIndex || '0', 10);
-              const coversScreen =
-                (st.position === 'fixed' || st.position === 'absolute') &&
-                rect.width >= window.innerWidth * 0.45 &&
-                rect.height >= window.innerHeight * 0.25 &&
-                z >= 5;
-
-              if (coversScreen) {
-                el.style.setProperty('display', 'none', 'important');
-                el.style.setProperty('visibility', 'hidden', 'important');
-              }
-            });
-          }
-
-          // Balanced Shields: avoid global overflow reset
-          // Balanced Shields: avoid global overflow reset
-        }
-
-        if (location.hostname.includes('cittadellaspezia')) {
-          setTimeout(() => {
-            [...document.querySelectorAll('body *')].forEach(el => {
-              const st = getComputedStyle(el);
-              const r = el.getBoundingClientRect();
-              const txt = [
-                el.id || '',
-                el.className || '',
-                el.getAttribute?.('src') || '',
-                el.getAttribute?.('href') || '',
-                el.getAttribute?.('style') || '',
-                el.innerText || ''
-              ].join(' ').slice(0, 300);
-
-              if (
-                r.width >= innerWidth * 0.35 ||
-                r.height >= innerHeight * 0.25 ||
-                st.position === 'fixed' ||
-                st.position === 'sticky'
-              ) {
-                console.warn('[ZapAds]', JSON.stringify({
-                  tag: el.tagName,
-                  id: el.id || '',
-                  cls: String(el.className || '').slice(0,120),
-                  pos: st.position,
-                  z: st.zIndex,
-                  w: Math.round(r.width),
-                  h: Math.round(r.height),
-                  top: Math.round(r.top),
-                  left: Math.round(r.left),
-                  txt
-                }));
-              }
-            });
-          }, 3000);
-        }
-
-        zapKillAggressiveOverlays();
-        setTimeout(zapKillAggressiveOverlays, 250);
-        setTimeout(zapKillAggressiveOverlays, 750);
-        setTimeout(zapKillAggressiveOverlays, 1500);
-        setTimeout(zapKillAggressiveOverlays, 3000);
-
-        if (!window.__zapOverlayObserver) {
-          window.__zapOverlayObserver = new MutationObserver(() => {
-            setTimeout(zapKillAggressiveOverlays, 50);
-          });
-
-          window.__zapOverlayObserver.observe(document.documentElement, {
-            childList: true,
-            subtree: true
-          });
-        }
-      })();
-    `).catch(()=>{})
+    if (overlayProtection.shouldEnableOverlayProtection(priv)) {
+      view.webContents.executeJavaScript(overlayProtection.getOverlayProtectionScript()).catch(() => {})
+    }
   }
 
   view.webContents.on('dom-ready', injectOverlayProtection)
 
   // Inject cosmetic ad-hiding CSS after each page load
   view.webContents.on('did-finish-load', () => {
+    if (!DB.getPrivacy(viewProfile.id).adblock) return
     const css = bl.getCosmeticCSS()
     if (css) {
       view.webContents.executeJavaScript(`
@@ -1259,8 +1166,11 @@ function createMainView(tabId = null, isPrivate = false) {
 
 
 function setupPrivacy(ses) {
+  if (privacySessions.has(ses)) return
+  privacySessions.add(ses)
+
   ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, cb) => {
-    const priv = DB.getPrivacy()
+    const priv = getPrivacyForSession(ses)
     if (!priv.adblock) return cb({})
 
     // Never block static assets — doing so breaks page rendering
@@ -1283,7 +1193,7 @@ function setupPrivacy(ses) {
       }
     } catch (_) {}
 
-    const earlyBlockPatterns = [
+    const compatibilityPatterns = [
       'quantcast',
       'qc-cmp',
       'didomi',
@@ -1303,6 +1213,16 @@ function setupPrivacy(ses) {
       'cookielaw',
       'cookie-law',
       'cookieconsent',
+      'tinypass',
+      'piano.io'
+    ]
+
+    const requestUrl = details.url.toLowerCase()
+    if (compatibilityPatterns.some(pattern => requestUrl.includes(pattern))) {
+      return cb({})
+    }
+
+    const earlyBlockPatterns = [
       'adsystem',
       'doubleclick',
       'googlesyndication',
@@ -1316,7 +1236,7 @@ function setupPrivacy(ses) {
       'outbrain'
     ]
 
-    if (earlyBlockPatterns.some(p => details.url.toLowerCase().includes(p))) {
+    if (earlyBlockPatterns.some(p => requestUrl.includes(p))) {
       bl.incrementBlocked()
       mainWindow?.webContents.send('blocked-count', bl.getBlockedCount())
       return cb({ cancel: true })
@@ -1344,7 +1264,7 @@ function setupPrivacy(ses) {
 
   ses.webRequest.onBeforeSendHeaders((details, cb) => {
     const headers = { ...details.requestHeaders }
-    const priv = DB.getPrivacy()
+    const priv = getPrivacyForSession(ses)
     if (priv.ua_mode !== 'default') headers['User-Agent'] = currentUA
     delete headers['X-Forwarded-For']
     delete headers['Via']
@@ -1353,7 +1273,7 @@ function setupPrivacy(ses) {
   })
 
   ses.setPermissionRequestHandler((wc, permission, cb) => {
-    const priv = DB.getPrivacy()
+    const priv = getPrivacyForSession(ses)
     // Block media if WebRTC protection is on; always block notifications
     if (priv.webrtc_protect && permission === 'media') return cb(false)
     if (permission === 'notifications') return cb(false)
@@ -1362,6 +1282,9 @@ function setupPrivacy(ses) {
 }
 
 function setupDownloads(ses) {
+  if (downloadSessions.has(ses)) return
+  downloadSessions.add(ses)
+
   ses.on('will-download', (_event, item) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     const fileName = item.getFilename()
@@ -1430,6 +1353,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800, minWidth: 900, minHeight: 600,
     frame: false, backgroundColor: '#0f0f12',
+    icon: path.join(__dirname, '../../assets/icons/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/shell.js'),
       contextIsolation: true,
@@ -1437,11 +1361,9 @@ function createWindow() {
     },
   })
 
-  session.defaultSession.setUserAgent(currentUA)
   activeView = null
 
-  setupPrivacy(session.defaultSession)
-  setupDownloads(session.defaultSession)
+  configureBrowserSession(session.defaultSession, DB.getBrowserProfileById('default'))
   applyNetworkProxy().catch(err => console.error('[Proxy] apply failed', err))
 
   bl.init((size) => {
@@ -1449,13 +1371,19 @@ function createWindow() {
   })
 
   mainWindow.on('resize', () => {
-    if (activeTabId && tabUrls.get(activeTabId)) showView(mainWindow, activeView)
+    if (activeTabId && tabUrls.get(activeTabId)) {
+      resizeView(mainWindow, activeView, shellLayout)
+    }
   })
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000')
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'))
+    const rendererIndex = app.isPackaged
+      ? path.join(app.getAppPath(), 'dist', 'index.html')
+      : path.join(__dirname, '../../dist/index.html')
+
+    mainWindow.loadFile(rendererIndex)
   }
 
   mainWindow.once('ready-to-show', () => {
@@ -1507,14 +1435,71 @@ ipcMain.handle('open-in-new-tab', (_, { url }) => {
   mainWindow?.webContents.send('open-new-tab', { url })
 })
 
+// ── IPC: browser profiles ────────────────────────────────────────────────────
+ipcMain.handle('browser-profile-active', () => DB.getActiveBrowserProfile())
+ipcMain.handle('browser-profile-list', () => DB.listBrowserProfiles())
+ipcMain.handle('browser-profile-create', (_, { name }) => {
+  V.assert(typeof name === 'string' && name.trim().length > 0 && name.length <= 120, 'Invalid profile name')
+  return DB.createBrowserProfile({ name: name.trim() })
+})
+ipcMain.handle('browser-profile-rename', (_, { id, name }) => {
+  V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
+  V.assert(typeof name === 'string' && name.trim().length > 0 && name.length <= 120, 'Invalid profile name')
+  return DB.renameBrowserProfile(id, name.trim())
+})
+ipcMain.handle('browser-profile-set-active', async (_, { id }) => {
+  V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
+  const current = getActiveBrowserProfile()
+
+  if (current.id === id) {
+    return { ok: true, changed: false, profile: current }
+  }
+
+  await disposeAllTabs()
+  const profile = DB.setActiveBrowserProfile(id)
+  const priv = DB.getPrivacy(profile.id)
+  doh.setEnabled(Number(priv.doh_enabled) === 1)
+  setUserAgentForConfiguredSessions()
+  await applyNetworkProxy()
+  mainWindow?.webContents.send('privacy-updated', getPrivacyState())
+
+  return { ok: true, changed: true, profile }
+})
+ipcMain.handle('browser-profile-delete', async (_, { id }) => {
+  V.assert(typeof id === 'string' && id.length > 0 && id.length <= 120, 'Invalid profile id')
+  const profile = DB.getBrowserProfileById(id)
+  V.assert(profile, 'Browser profile not found')
+  V.assert(Number(profile.is_default) !== 1, 'The default profile cannot be deleted')
+
+  if (getActiveBrowserProfile().id === profile.id) {
+    await disposeAllTabs()
+  }
+
+  const profileSession = getProfileSession(profile)
+  try { await profileContext.clearSessionStorage(profileSession) } catch (_) {}
+  forgetBrowserProfileSessions(profile.id)
+
+  const result = DB.deleteBrowserProfile(profile.id)
+  if (result.was_active) {
+    const priv = DB.getPrivacy(result.active_profile.id)
+    doh.setEnabled(Number(priv.doh_enabled) === 1)
+    setUserAgentForConfiguredSessions()
+    await applyNetworkProxy()
+    mainWindow?.webContents.send('privacy-updated', getPrivacyState())
+  }
+  return result
+})
+
 // ── IPC: tabs ─────────────────────────────────────────────────────────────────
 ipcMain.handle('tab-create', (_, { tabId, private: isPrivate = false }) => {
+  const profile = getActiveBrowserProfile()
+
   tabUrls.set(tabId, '')
-  tabMeta.set(tabId, { private: !!isPrivate })
+  tabMeta.set(tabId, { private: !!isPrivate, profileId: profile.id })
   activeTabId = tabId
 
   if (!tabViews.has(tabId)) {
-    tabViews.set(tabId, createMainView(tabId, !!isPrivate))
+    tabViews.set(tabId, createMainView(tabId, !!isPrivate, profile))
   }
 
   if (activeView) hideView(mainWindow, activeView)
@@ -1523,7 +1508,7 @@ ipcMain.handle('tab-create', (_, { tabId, private: isPrivate = false }) => {
   // Empty tabs are rendered by the React shell, not BrowserView.
   hideView(mainWindow, activeView)
 
-  return { ok: true }
+  return { ok: true, profileId: profile.id }
 })
 
 ipcMain.handle('tab-switch', (_, { tabId }) => {
@@ -1539,20 +1524,22 @@ ipcMain.handle('tab-switch', (_, { tabId }) => {
   let view = tabViews.get(tabId)
   if (!view) {
     const meta = tabMeta.get(tabId) || {}
-    view = createMainView(tabId, !!meta.private)
+    view = createMainView(tabId, !!meta.private, getBrowserProfileForTab(tabId))
     tabViews.set(tabId, view)
   }
 
   if (activeView && activeView !== view) hideView(mainWindow, activeView)
   activeView = view
-  showView(mainWindow, activeView)
+  showView(mainWindow, activeView, shellLayout)
 
   const current = activeView.webContents.getURL()
   if (!current || current === 'about:blank') {
     isSwitching = true
     navigationOwnerTabId = tabId
-    activeView.webContents.loadURL(url)
-      .catch(() => {})
+    view.webContents.loadURL(url)
+      .catch((err) => {
+        showNavigationErrorPage(view, tabId, url, err?.errno || 'LOAD_FAILED', err?.message || 'Navigation failed')
+      })
       .finally(() => { isSwitching = false })
   }
 
@@ -1572,54 +1559,36 @@ ipcMain.handle('tab-navigate', async (_, { tabId, url }) => {
   let view = tabViews.get(tabId)
   if (!view) {
     const meta = tabMeta.get(tabId) || {}
-    view = createMainView(tabId, !!meta.private)
+    view = createMainView(tabId, !!meta.private, getBrowserProfileForTab(tabId))
     tabViews.set(tabId, view)
   }
 
   activeTabId = tabId
   navigationOwnerTabId = tabId
+  tabErrorPages.delete(tabId)
   tabUrls.set(tabId, u)
 
   if (activeView && activeView !== view) hideView(mainWindow, activeView)
   activeView = view
-  showView(mainWindow, activeView)
+  showView(mainWindow, activeView, shellLayout)
 
   await new Promise(r => setTimeout(r, 50))
-  activeView.webContents.loadURL(u).catch(() => {})
+  view.webContents.loadURL(u).catch((err) => {
+    showNavigationErrorPage(view, tabId, u, err?.errno || 'LOAD_FAILED', err?.message || 'Navigation failed')
+  })
 
   return { ok: true, url: u }
 })
 
-ipcMain.handle('tab-close', (_, { tabId }) => {
-  tabUrls.delete(tabId)
-  const meta = tabMeta.get(tabId) || {}
-  tabMeta.delete(tabId)
-
-  const view = tabViews.get(tabId)
-  if (view) {
-    try { hideView(mainWindow, view) } catch (_) {}
-    try {
-      if (meta.private) {
-        view.webContents.session.clearStorageData().catch(() => {})
-        view.webContents.session.clearCache().catch(() => {})
-      }
-    } catch (_) {}
-
-    try { view.webContents.destroy() } catch (_) {}
-    tabViews.delete(tabId)
-  }
-
-  if (activeTabId === tabId) {
-    activeView = null
-    activeTabId = null
-  }
-
+ipcMain.handle('tab-close', async (_, { tabId }) => {
+  await disposeTab(tabId)
   return { ok: true }
 })
 
 ipcMain.handle('tab-home', (_, { tabId }) => {
   activeTabId = tabId
   tabUrls.set(tabId, '')
+  tabErrorPages.delete(tabId)
 
   const view = tabViews.get(tabId)
   if (view) hideView(mainWindow, view)
@@ -1633,9 +1602,41 @@ ipcMain.handle('tab-go-back',  () => activeView?.webContents.goBack())
 ipcMain.handle('tab-go-forward', () => activeView?.webContents.goForward())
 ipcMain.handle('tab-reload',   () => activeView?.webContents.reload())
 
+ipcMain.handle('tab-find', (_, { tabId, text, forward = true, findNext = false } = {}) => {
+  if (!tabId || tabId !== activeTabId) return { ok: false, error: 'Inactive tab' }
+  if (typeof text !== 'string' || text.length === 0 || text.length > 500) {
+    return { ok: false, error: 'Invalid search text' }
+  }
+
+  const view = tabViews.get(tabId)
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'Tab not available' }
+
+  view.webContents.findInPage(text, {
+    forward: !!forward,
+    findNext: !!findNext,
+  })
+
+  return { ok: true }
+})
+
+ipcMain.handle('tab-stop-find', (_, { tabId, action = 'clearSelection' } = {}) => {
+  if (!tabId || tabId !== activeTabId) return { ok: false, error: 'Inactive tab' }
+
+  const view = tabViews.get(tabId)
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: 'Tab not available' }
+
+  view.webContents.stopFindInPage(action)
+  return { ok: true }
+})
+
 ipcMain.handle('shell-resize', (_, args) => {
+  shellLayout = {
+    panelWidth: Number.isFinite(Number(args?.panelWidth))
+      ? Math.max(0, Number(args.panelWidth))
+      : (args?.panelOpen ? 320 : 0),
+  }
   if (!activeTabId || !tabUrls.get(activeTabId)) return
-  resizeView(mainWindow, activeView, args)
+  resizeView(mainWindow, activeView, shellLayout)
 })
 
 ipcMain.handle('download-cancel', (_, { id }) => {
@@ -1751,8 +1752,9 @@ ipcMain.handle('show-ua-menu', () => {
       click: () => {
         DB.setPrivacy('ua_mode', 'rotate')
         currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-        session.defaultSession.setUserAgent(currentUA)
+        setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+        publishPrivacyUpdated()
       },
     },
     {
@@ -1761,8 +1763,9 @@ ipcMain.handle('show-ua-menu', () => {
       checked: current === 'default',
       click: () => {
         DB.setPrivacy('ua_mode', 'default')
-        session.defaultSession.setUserAgent('')
+        setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'default', ua: '' })
+        publishPrivacyUpdated()
       },
     },
     { type: 'separator' },
@@ -1770,8 +1773,9 @@ ipcMain.handle('show-ua-menu', () => {
       label: 'Rotate now',
       click: () => {
         currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-        session.defaultSession.setUserAgent(currentUA)
+        setUserAgentForConfiguredSessions()
         mainWindow?.webContents.send('ua-mode-updated', { mode: 'rotate', ua: currentUA })
+        publishPrivacyUpdated()
       },
     },
   ])
@@ -1781,26 +1785,51 @@ ipcMain.handle('show-ua-menu', () => {
 })
 
 // ── IPC: privacy ──────────────────────────────────────────────────────────────
-ipcMain.handle('get-privacy', () => ({
-  ...DB.getPrivacy(),
-  blockedCount:   bl.getBlockedCount(),
-  blocklistSize:  bl.getListSize(),
-  blocklistReady: bl.isReady(),
-  dohEnabled:     doh.isEnabled(),
-}))
-ipcMain.handle('set-adblock',  (_, { enabled }) => DB.setPrivacy('adblock', enabled ? 1 : 0))
-ipcMain.handle('set-webrtc',   (_, { enabled }) => DB.setPrivacy('webrtc_protect', enabled ? 1 : 0))
-ipcMain.handle('set-popup-block', (_, { enabled }) => DB.setPrivacy('popup_block', enabled ? 1 : 0))
-ipcMain.handle('set-overlay-block', (_, { enabled }) => DB.setPrivacy('overlay_block', enabled ? 1 : 0))
+function getPrivacyState() {
+  const priv = DB.getPrivacy()
+  return {
+    ...priv,
+    blockedCount:   bl.getBlockedCount(),
+    blocklistSize:  bl.getListSize(),
+    blocklistReady: bl.isReady(),
+    dohEnabled:     Number(priv.doh_enabled) === 1,
+  }
+}
+
+function publishPrivacyUpdated() {
+  const state = getPrivacyState()
+  mainWindow?.webContents.send('privacy-updated', state)
+  return state
+}
+
+ipcMain.handle('get-privacy', () => getPrivacyState())
+ipcMain.handle('set-adblock',  (_, { enabled }) => {
+  DB.setPrivacy('adblock', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
+ipcMain.handle('set-webrtc',   (_, { enabled }) => {
+  DB.setPrivacy('webrtc_protect', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
+ipcMain.handle('set-popup-block', (_, { enabled }) => {
+  DB.setPrivacy('popup_block', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
+ipcMain.handle('set-overlay-block', (_, { enabled }) => {
+  DB.setPrivacy('overlay_block', enabled ? 1 : 0)
+  return publishPrivacyUpdated()
+})
 ipcMain.handle('set-ua-mode',  (_, { mode }) => {
   DB.setPrivacy('ua_mode', mode)
   if (mode === 'rotate') currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-  session.defaultSession.setUserAgent(mode === 'default' ? '' : currentUA)
+  setUserAgentForConfiguredSessions()
+  publishPrivacyUpdated()
   return currentUA
 })
 ipcMain.handle('rotate-ua', () => {
   currentUA = UA_POOL[Math.floor(Math.random() * UA_POOL.length)]
-  session.defaultSession.setUserAgent(currentUA)
+  setUserAgentForConfiguredSessions()
+  publishPrivacyUpdated()
   return currentUA
 })
 ipcMain.handle('get-blocked-count',  () => bl.getBlockedCount())
@@ -1809,7 +1838,8 @@ ipcMain.handle('set-doh', (_, { enabled, provider }) => {
   doh.setEnabled(enabled)
   if (provider) doh.setProvider(provider)
   DB.setPrivacy('doh_enabled', enabled ? 1 : 0)
-  return { ok: true }
+  if (provider) DB.setPrivacy('doh_provider', provider)
+  return publishPrivacyUpdated()
 })
 ipcMain.handle('set-tor-proxy', async (_, { enabled, host, port } = {}) => {
   DB.setPrivacy('tor_enabled', enabled ? 1 : 0)
@@ -1825,7 +1855,9 @@ ipcMain.handle('set-tor-proxy', async (_, { enabled, host, port } = {}) => {
     DB.setPrivacy('tor_port', safePort)
   }
 
-  return applyNetworkProxy()
+  const result = await applyNetworkProxy()
+  publishPrivacyUpdated()
+  return result
 })
 ipcMain.handle('get-download-history', () => {
   const items = DB.getDownloads()
@@ -1880,7 +1912,7 @@ ipcMain.handle('nostr-create-profile', (_, args) => {
   if (args.name != null) {
     V.assert(typeof args.name === 'string' && args.name.length <= 120, 'Invalid name')
   }
-  return nostr.createProfile(DB, args)
+  return nostr.createProfile(DB, args, getActiveBrowserProfile().id)
 })
 ipcMain.handle('nostr-import-nsec',    (_, args) => {
   V.validateNsec(args?.nsec)
@@ -1889,20 +1921,20 @@ ipcMain.handle('nostr-import-nsec',    (_, args) => {
     V.assert(typeof args.name === 'string' && args.name.length <= 120, 'Invalid name')
   }
 
-  return nostr.importNsec(DB, args)
+  return nostr.importNsec(DB, args, getActiveBrowserProfile().id)
 })
 ipcMain.handle('nostr-skip',           () => DB.setSetting('nostr_skipped', '1'))
-ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB))
-ipcMain.handle('nostr-list-profiles',  () => nostr.listProfiles(DB))
+ipcMain.handle('nostr-get-profile',    () => nostr.getProfile(DB, getActiveBrowserProfile().id))
+ipcMain.handle('nostr-list-profiles',  () => nostr.listProfiles(DB, getActiveBrowserProfile().id))
 ipcMain.handle('nostr-set-active-profile', (_, { id }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
-  return nostr.setActiveProfile(DB, Number(id))
+  return nostr.setActiveProfile(DB, Number(id), getActiveBrowserProfile().id)
 })
 ipcMain.handle('nostr-remove-profile-by-id', (_, { id }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid profile id')
-  return nostr.removeProfileById(DB, Number(id))
+  return nostr.removeProfileById(DB, Number(id), getActiveBrowserProfile().id)
 })
-ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB))
+ipcMain.handle('nostr-remove-profile', () => nostr.removeProfile(DB, getActiveBrowserProfile().id))
 ipcMain.handle('nostr-list-permissions', () => DB.listNostrPermissions())
 ipcMain.handle('nostr-clear-permissions', () => DB.clearNostrPermissions())
 ipcMain.handle('nostr-remove-permission', (_, { origin, action }) => {
@@ -1913,9 +1945,9 @@ ipcMain.handle('nostr-remove-permission', (_, { origin, action }) => {
 ipcMain.handle('nostr-get-relays',     () => nostr.getRelays())
 ipcMain.handle('nostr-sign-event',     (_, { event }) => {
   V.validateNostrEvent(event)
-  return nostr.signEvent(DB, event)
+  return nostr.signEvent(DB, event, getActiveBrowserProfile().id)
 })
-ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB))
+ipcMain.handle('nostr-get-pubkey',     () => nostr.getPubkey(DB, getActiveBrowserProfile().id))
 // NIP-07 aliases — same implementation, separate IPC channels for clarity
 ipcMain.handle('nostr-get-pubkey-nip07', async (ipcEvent) => {
   const allowed = await confirmNostrPermission(ipcEvent, 'getPublicKey', null)
@@ -1924,7 +1956,7 @@ ipcMain.handle('nostr-get-pubkey-nip07', async (ipcEvent) => {
     throw new Error('Nostr public key request denied by user')
   }
 
-  return nostr.getPubkey(DB)
+  return nostr.getPubkey(DB, getIpcBrowserProfileId(ipcEvent))
 })
 ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
   V.validateNostrEvent(e)
@@ -1935,7 +1967,7 @@ ipcMain.handle('nostr-sign-event-nip07', async (ipcEvent, { event: e }) => {
     throw new Error('Nostr signing request denied by user')
   }
 
-  return nostr.signEvent(DB, e)
+  return nostr.signEvent(DB, e, getIpcBrowserProfileId(ipcEvent))
 })
 ipcMain.handle('nostr-get-relays-nip07',  () => nostr.getRelays())
 ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
@@ -1963,7 +1995,10 @@ ipcMain.handle('nostr-nip04-encrypt', async (ipcEvent, { pubkey, text }) => {
 
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
-  const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
+  const browserProfileId = getIpcBrowserProfileId(ipcEvent)
+  const row = DB._db()
+    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE browser_profile_id=? AND active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get(browserProfileId)
 
   if (!row) throw new Error('No Nostr profile found')
 
@@ -1997,7 +2032,10 @@ ipcMain.handle('nostr-nip04-decrypt', async (ipcEvent, { pubkey, text }) => {
 
   const { nip04 } = require('nostr-tools')
   const keychain = require('./keychain')
-  const row = DB._db().prepare('SELECT encrypted_nsec FROM nostr_profile WHERE id=1').get()
+  const browserProfileId = getIpcBrowserProfileId(ipcEvent)
+  const row = DB._db()
+    .prepare('SELECT encrypted_nsec FROM nostr_profile WHERE browser_profile_id=? AND active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1')
+    .get(browserProfileId)
 
   if (!row) throw new Error('No Nostr profile found')
 
@@ -2055,6 +2093,414 @@ ipcMain.handle('decode-invoice',  (_, { bolt11 }) => {
   return nwc.decodeInvoice(bolt11)
 })
 
+function decodeBookmarkText(value) {
+  return String(value || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .trim()
+}
+
+function makeBookmarkSourceId(filePath) {
+  return crypto.createHash('sha256').update(filePath).digest('hex').slice(0, 16)
+}
+
+function pathExists(filePath) {
+  try {
+    return !!filePath && fs.existsSync(filePath)
+  } catch (_) {
+    return false
+  }
+}
+
+function readJsonFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'))
+}
+
+function normalizeBookmarkUrl(url) {
+  const value = String(url || '').trim()
+  if (!/^https?:\/\//i.test(value)) return ''
+  return value
+}
+
+function parseChromeBookmarkNode(node) {
+  if (!node || typeof node !== 'object') return null
+
+  if (node.type === 'url') {
+    const url = normalizeBookmarkUrl(node.url)
+    if (!url) return null
+    return {
+      type: 'bookmark',
+      title: String(node.name || url).trim() || url,
+      url,
+    }
+  }
+
+  if (node.type === 'folder') {
+    const children = Array.isArray(node.children)
+      ? node.children.map(parseChromeBookmarkNode).filter(Boolean)
+      : []
+
+    if (!children.length && !String(node.name || '').trim()) return null
+
+    return {
+      type: 'folder',
+      title: String(node.name || 'Folder').trim() || 'Folder',
+      children,
+    }
+  }
+
+  return null
+}
+
+function parseChromeBookmarksFile(filePath) {
+  const data = readJsonFile(filePath)
+  const roots = data?.roots || {}
+  const nodes = []
+
+  for (const key of ['bookmark_bar', 'other', 'synced']) {
+    const parsed = parseChromeBookmarkNode(roots[key])
+    if (parsed) nodes.push(parsed)
+  }
+
+  return nodes
+}
+
+function parseFirefoxBookmarksFile(filePath) {
+  const Database = require('better-sqlite3')
+  const tmpPath = path.join(os.tmpdir(), `zap-firefox-bookmarks-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`)
+
+  try {
+    fs.copyFileSync(filePath, tmpPath)
+    const places = new Database(tmpPath, { readonly: true, fileMustExist: true })
+
+    try {
+      const rows = places.prepare(`
+        SELECT
+          b.id,
+          b.parent,
+          b.type,
+          COALESCE(NULLIF(b.title, ''), p.title, p.url, 'Folder') AS title,
+          b.position,
+          p.url
+        FROM moz_bookmarks b
+        LEFT JOIN moz_places p ON p.id=b.fk
+        WHERE b.type IN (1, 2)
+        ORDER BY b.parent ASC, b.position ASC, b.id ASC
+      `).all()
+
+      const byParent = new Map()
+      const byId = new Map()
+
+      for (const row of rows) {
+        byId.set(row.id, row)
+        const key = row.parent == null ? 'root' : String(row.parent)
+        if (!byParent.has(key)) byParent.set(key, [])
+        byParent.get(key).push(row)
+      }
+
+      const toNode = (row) => {
+        if (Number(row.type) === 1) {
+          const url = normalizeBookmarkUrl(row.url)
+          if (!url) return null
+          return {
+            type: 'bookmark',
+            title: String(row.title || url).trim() || url,
+            url,
+          }
+        }
+
+        const children = (byParent.get(String(row.id)) || [])
+          .map(toNode)
+          .filter(Boolean)
+
+        if (!children.length) return null
+
+        return {
+          type: 'folder',
+          title: String(row.title || 'Folder').trim() || 'Folder',
+          children,
+        }
+      }
+
+      const rootChildren = (byParent.get('1') || [])
+        .filter(row => Number(row.type) === 2)
+        .map(toNode)
+        .filter(Boolean)
+
+      if (rootChildren.length) return rootChildren
+
+      return rows
+        .filter(row => Number(row.type) === 2 && !byId.has(row.parent))
+        .map(toNode)
+        .filter(Boolean)
+    } finally {
+      places.close()
+    }
+  } finally {
+    try { fs.unlinkSync(tmpPath) } catch (_) {}
+  }
+}
+
+function parseBookmarksHtml(html) {
+  const root = []
+  const stack = [{ children: root }]
+  const tokenRe = /<DT>\s*<H3[^>]*>(.*?)<\/H3>|<\/DL\s*>|<DT>\s*<A[^>]+HREF=(["'])(.*?)\2[^>]*>(.*?)<\/A>/gis
+
+  let match
+  while ((match = tokenRe.exec(html)) !== null) {
+    const folderTitle = decodeBookmarkText(match[1])
+    const url = normalizeBookmarkUrl(match[3])
+    const title = decodeBookmarkText(match[4])
+
+    if (folderTitle) {
+      const folder = {
+        type: 'folder',
+        title: folderTitle,
+        children: [],
+      }
+      stack[stack.length - 1].children.push(folder)
+      stack.push(folder)
+      continue
+    }
+
+    if (match[0].toUpperCase().startsWith('</DL')) {
+      if (stack.length > 1) stack.pop()
+      continue
+    }
+
+    if (url) {
+      stack[stack.length - 1].children.push({
+        type: 'bookmark',
+        title: title || url,
+        url,
+      })
+    }
+  }
+
+  return root
+}
+
+function importBookmarkNodes(nodes, options = {}) {
+  const favorites = DB.getFavorites()
+  const existingUrls = new Set(
+    favorites
+      .filter(item => Number(item.is_folder) !== 1 && item.url)
+      .map(item => String(item.url).trim().toLowerCase())
+  )
+  const folderByParentAndTitle = new Map()
+
+  for (const item of favorites) {
+    if (Number(item.is_folder) !== 1) continue
+    const key = `${item.parent_id ?? 'root'}:${String(item.title || '').trim().toLowerCase()}`
+    if (!folderByParentAndTitle.has(key)) folderByParentAndTitle.set(key, item.id)
+  }
+
+  let importedBookmarks = 0
+  let importedFolders = 0
+  let skippedDuplicates = 0
+  let sortOrder = Date.now()
+
+  const ensureFolder = (title, parentId) => {
+    const safeTitle = String(title || 'Folder').trim() || 'Folder'
+    const key = `${parentId ?? 'root'}:${safeTitle.toLowerCase()}`
+    const existing = folderByParentAndTitle.get(key)
+    if (existing) return existing
+
+    const folder = DB.addFavorite({
+      title: safeTitle,
+      url: '',
+      favicon: null,
+      parent_id: parentId,
+      is_folder: 1,
+      sort_order: sortOrder++,
+    })
+
+    folderByParentAndTitle.set(key, folder.id)
+    importedFolders++
+    return folder.id
+  }
+
+  const rootParent = options.rootTitle
+    ? ensureFolder(options.rootTitle, null)
+    : null
+
+  const walk = (items, parentId) => {
+    for (const item of items || []) {
+      if (!item) continue
+
+      if (item.type === 'folder') {
+        const folderId = ensureFolder(item.title, parentId)
+        walk(item.children || [], folderId)
+        continue
+      }
+
+      if (item.type !== 'bookmark') continue
+
+      const url = normalizeBookmarkUrl(item.url)
+      if (!url) continue
+
+      const key = url.toLowerCase()
+      if (existingUrls.has(key)) {
+        skippedDuplicates++
+        continue
+      }
+
+      DB.addFavorite({
+        title: String(item.title || url).trim() || url,
+        url,
+        favicon: null,
+        parent_id: parentId,
+        is_folder: 0,
+        sort_order: sortOrder++,
+      })
+
+      existingUrls.add(key)
+      importedBookmarks++
+    }
+  }
+
+  walk(nodes, rootParent)
+
+  return {
+    ok: true,
+    importedBookmarks,
+    importedFolders,
+    skippedDuplicates,
+  }
+}
+
+function chromiumProfileDirs(userDataDir) {
+  if (!pathExists(userDataDir)) return []
+
+  let entries = []
+  try {
+    entries = fs.readdirSync(userDataDir, { withFileTypes: true })
+  } catch (_) {
+    return []
+  }
+
+  return entries
+    .filter(entry => entry.isDirectory() && (entry.name === 'Default' || /^Profile \d+$/i.test(entry.name)))
+    .map(entry => ({
+      profileName: entry.name,
+      filePath: path.join(userDataDir, entry.name, 'Bookmarks'),
+    }))
+    .filter(item => pathExists(item.filePath))
+}
+
+function readFirefoxProfiles(baseDir) {
+  const iniPath = path.join(baseDir, 'profiles.ini')
+  if (!pathExists(iniPath)) return []
+
+  let ini = ''
+  try {
+    ini = fs.readFileSync(iniPath, 'utf8')
+  } catch (_) {
+    return []
+  }
+
+  const sections = ini.split(/\n\s*\n/g)
+  const profiles = []
+
+  for (const section of sections) {
+    if (!/^\s*\[Profile\d+\]/m.test(section)) continue
+
+    const get = (key) => section.match(new RegExp(`^${key}=(.*)$`, 'mi'))?.[1]?.trim()
+    const profilePath = get('Path')
+    if (!profilePath) continue
+
+    const isRelative = get('IsRelative') !== '0'
+    const name = get('Name') || path.basename(profilePath)
+    const dir = isRelative ? path.join(baseDir, profilePath) : profilePath
+    const filePath = path.join(dir, 'places.sqlite')
+
+    if (pathExists(filePath)) {
+      profiles.push({ profileName: name, filePath })
+    }
+  }
+
+  return profiles
+}
+
+function detectBookmarkSources() {
+  const home = os.homedir()
+  const platform = process.platform
+  const sources = []
+  const addSource = (source) => {
+    sources.push({
+      id: makeBookmarkSourceId(source.filePath),
+      ...source,
+    })
+  }
+
+  const chromiumBases = []
+
+  if (platform === 'linux') {
+    const config = process.env.XDG_CONFIG_HOME || path.join(home, '.config')
+    chromiumBases.push(
+      { browser: 'Chrome', base: path.join(config, 'google-chrome') },
+      { browser: 'Chromium', base: path.join(config, 'chromium') },
+      { browser: 'Brave', base: path.join(config, 'BraveSoftware', 'Brave-Browser') },
+      { browser: 'Edge', base: path.join(config, 'microsoft-edge') },
+      { browser: 'Vivaldi', base: path.join(config, 'vivaldi') }
+    )
+  }
+
+  if (platform === 'win32') {
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
+    chromiumBases.push(
+      { browser: 'Chrome', base: path.join(local, 'Google', 'Chrome', 'User Data') },
+      { browser: 'Chromium', base: path.join(local, 'Chromium', 'User Data') },
+      { browser: 'Brave', base: path.join(local, 'BraveSoftware', 'Brave-Browser', 'User Data') },
+      { browser: 'Edge', base: path.join(local, 'Microsoft', 'Edge', 'User Data') },
+      { browser: 'Vivaldi', base: path.join(local, 'Vivaldi', 'User Data') }
+    )
+  }
+
+  for (const item of chromiumBases) {
+    for (const profile of chromiumProfileDirs(item.base)) {
+      addSource({
+        type: 'chromium',
+        browser: item.browser,
+        profile: profile.profileName,
+        label: `${item.browser} (${profile.profileName})`,
+        filePath: profile.filePath,
+      })
+    }
+  }
+
+  const firefoxBases = []
+  if (platform === 'linux') firefoxBases.push(path.join(home, '.mozilla', 'firefox'))
+  if (platform === 'win32') {
+    const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming')
+    firefoxBases.push(path.join(roaming, 'Mozilla', 'Firefox'))
+  }
+
+  for (const base of firefoxBases) {
+    for (const profile of readFirefoxProfiles(base)) {
+      addSource({
+        type: 'firefox',
+        browser: 'Firefox',
+        profile: profile.profileName,
+        label: `Firefox (${profile.profileName})`,
+        filePath: profile.filePath,
+      })
+    }
+  }
+
+  return sources
+}
+
+function loadBookmarkSource(source) {
+  if (source.type === 'chromium') return parseChromeBookmarksFile(source.filePath)
+  if (source.type === 'firefox') return parseFirefoxBookmarksFile(source.filePath)
+  throw new Error('Unsupported source')
+}
+
 // ── IPC: favorites ────────────────────────────────────────────────────────────
 ipcMain.handle('get-favorites',   () => DB.getFavorites())
 ipcMain.handle('add-favorite',    (_, args) => {
@@ -2063,6 +2509,25 @@ ipcMain.handle('add-favorite',    (_, args) => {
   if (args.title != null) V.assert(typeof args.title === 'string' && args.title.length <= 300, 'Invalid title')
   if (args.favicon != null) V.assert(typeof args.favicon === 'string' && args.favicon.length <= 5000, 'Invalid favicon')
   return DB.addFavorite(args)
+})
+ipcMain.handle('add-favorite-at', (_, args) => {
+  V.assert(args && typeof args === 'object', 'Invalid favorite payload')
+  V.assert(typeof args.url === 'string' && args.url.length > 0 && args.url.length <= 3000, 'Invalid URL')
+  V.assert(typeof args.title === 'string' && args.title.length <= 300, 'Invalid title')
+  if (args.favicon != null) V.assert(typeof args.favicon === 'string' && args.favicon.length <= 5000, 'Invalid favicon')
+  if (args.parent_id !== null && args.parent_id !== undefined) {
+    V.assert(Number.isSafeInteger(Number(args.parent_id)), 'Invalid parent folder id')
+  }
+  if (args.index !== null && args.index !== undefined) {
+    V.assert(Number.isSafeInteger(Number(args.index)) && Number(args.index) >= 0, 'Invalid favorite position')
+  }
+
+  return DB.addFavoriteAt({
+    title: args.title.trim() || args.url,
+    url: args.url,
+    favicon: args.favicon || null,
+    parent_id: args.parent_id === 'root' ? null : args.parent_id,
+  }, args.index === null || args.index === undefined ? null : Number(args.index))
 })
 ipcMain.handle('remove-favorite', (_, { id }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
@@ -2075,14 +2540,21 @@ ipcMain.handle('rename-favorite', (_, { id, title }) => {
   return DB.updateFavoriteTitle(Number(id), title.trim())
 })
 
-ipcMain.handle('move-favorite', (_, { id, parent_id }) => {
+ipcMain.handle('move-favorite', (_, { id, parent_id, index }) => {
   V.assert(Number.isSafeInteger(Number(id)), 'Invalid favorite id')
 
   if (parent_id !== null && parent_id !== undefined) {
     V.assert(Number.isSafeInteger(Number(parent_id)), 'Invalid parent folder id')
   }
+  if (index !== null && index !== undefined) {
+    V.assert(Number.isSafeInteger(Number(index)) && Number(index) >= 0, 'Invalid favorite position')
+  }
 
-  return DB.moveFavorite(Number(id), parent_id === 'root' ? null : parent_id)
+  return DB.moveFavorite(
+    Number(id),
+    parent_id === 'root' ? null : parent_id,
+    index === null || index === undefined ? null : Number(index),
+  )
 })
 
 ipcMain.handle('export-favorites-html', () => {
@@ -2138,58 +2610,44 @@ ipcMain.handle('export-favorites-html', () => {
 ipcMain.handle('import-favorites-html', (_, { html }) => {
   V.assert(typeof html === 'string' && html.length <= 10_000_000, 'Invalid bookmarks HTML')
 
-  const results = []
-  const stack = [null]
-  let sortOrder = 0
+  return importBookmarkNodes(parseBookmarksHtml(html))
+})
 
-  const tokenRe = /<DT>\s*<H3[^>]*>(.*?)<\/H3>|<DL><p>|<\/DL><p>|<DT>\s*<A[^>]+HREF="([^"]+)"[^>]*>(.*?)<\/A>/gis
+ipcMain.handle('detect-bookmark-import-sources', () => {
+  return detectBookmarkSources().map(({ filePath, ...source }) => source)
+})
 
-  let match
-  while ((match = tokenRe.exec(html)) !== null) {
-    const folderTitle = match[1]?.replace(/<[^>]+>/g, '').trim()
-    const url = match[2]?.trim()
-    const title = match[3]?.replace(/<[^>]+>/g, '').trim()
+ipcMain.handle('import-bookmarks-from-browser', (_, { sourceId }) => {
+  V.assert(typeof sourceId === 'string' && /^[0-9a-f]{16}$/.test(sourceId), 'Invalid bookmark source')
 
-    if (folderTitle) {
-      try {
-        const parentId = stack[stack.length - 1]
-        const folder = DB.addFavorite({
-          title: folderTitle,
-          url: '',
-          favicon: null,
-          parent_id: parentId,
-          is_folder: 1,
-          sort_order: sortOrder++,
-        })
+  const source = detectBookmarkSources().find(item => item.id === sourceId)
+  if (!source) return { ok: false, error: 'Bookmark source not available' }
 
-        stack.push(folder.id)
-        results.push({ type: 'folder', title: folderTitle })
-      } catch (_) {}
-      continue
+  try {
+    const nodes = loadBookmarkSource(source)
+    return {
+      ...importBookmarkNodes(nodes, {
+        rootTitle: `${source.browser} ${source.profile || 'Bookmarks'}`.trim(),
+      }),
+      source: {
+        id: source.id,
+        label: source.label,
+        browser: source.browser,
+        profile: source.profile,
+      },
     }
-
-    if (match[0].toUpperCase().startsWith('</DL')) {
-      if (stack.length > 1) stack.pop()
-      continue
-    }
-
-    if (url && title && /^https?:\/\//i.test(url)) {
-      try {
-        DB.addFavorite({
-          title,
-          url,
-          favicon: null,
-          parent_id: stack[stack.length - 1],
-          is_folder: 0,
-          sort_order: sortOrder++,
-        })
-
-        results.push({ type: 'bookmark', url, title })
-      } catch (_) {}
+  } catch (err) {
+    return {
+      ok: false,
+      error: err?.message || 'Bookmark import failed',
+      source: {
+        id: source.id,
+        label: source.label,
+        browser: source.browser,
+        profile: source.profile,
+      },
     }
   }
-
-  return results
 })
 
 // ── IPC: cashu ────────────────────────────────────────────────────────────────
@@ -2279,13 +2737,18 @@ ipcMain.handle('get-history',   (_, { limit } = {}) => {
 })
 ipcMain.handle('clear-history', () => DB.clearHistory())
 ipcMain.handle('clear-cookies', async () => {
-  await session.defaultSession.clearStorageData({
-    storages: ['cookies', 'localstorage', 'sessionstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage'],
-  })
+  const activeProfile = getActiveBrowserProfile()
+  const activeSession = configureBrowserSession(getProfileSession(activeProfile), activeProfile)
+  await activeSession.clearStorageData({ storages: profileContext.PROFILE_STORAGE_TYPES })
+  await activeSession.flushStorageData()
+
   return { ok: true }
 })
 ipcMain.handle('clear-cache', async () => {
-  await session.defaultSession.clearCache()
+  const activeProfile = getActiveBrowserProfile()
+  const activeSession = configureBrowserSession(getProfileSession(activeProfile), activeProfile)
+  await activeSession.clearCache()
+
   return { ok: true }
 })
 ipcMain.handle('reset-browser', () => {

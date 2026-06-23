@@ -16,10 +16,39 @@ interface TabState {
   canGoBack?: boolean; canGoForward?: boolean
 }
 
+const CURRENT_PAGE_DRAG_TYPE = 'application/x-zap-current-page'
+
+interface CurrentPageDrag {
+  url: string
+  title: string
+  favicon?: string
+}
+
+function readCurrentPageDrag(dataTransfer: DataTransfer): CurrentPageDrag | null {
+  try {
+    const raw = dataTransfer.getData(CURRENT_PAGE_DRAG_TYPE)
+    if (!raw) return null
+    const page = JSON.parse(raw)
+    if (!page || typeof page.url !== 'string' || !page.url) return null
+    return {
+      url: page.url,
+      title: typeof page.title === 'string' && page.title ? page.title : page.url,
+      favicon: typeof page.favicon === 'string' && page.favicon ? page.favicon : undefined,
+    }
+  } catch (_) {
+    return null
+  }
+}
+
+function hasCurrentPageDrag(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types || []).includes(CURRENT_PAGE_DRAG_TYPE)
+}
+
 export default function BrowserPage() {
   const { L } = useLang()
-  const { tabs, activeId, addTab, closeTab, setActive, reorderTabs, updateTab, navigate } = useBrowser()
+  const { tabs, activeId, addTab, closeTab, setActive, reorderTabs, updateTab, navigate, resetTabs } = useBrowser()
   const [panel, setPanel]       = useState<Panel>(null)
+  const [browserProfile, setBrowserProfile] = useState<any>(null)
   const [addrVal, setAddrVal]   = useState('')
   const [privacy, setPrivacy]   = useState<any>(null)
   const [uaDrop, setUaDrop]     = useState(false)
@@ -32,6 +61,9 @@ export default function BrowserPage() {
   const [favContext, setFavContext] = useState<any>(null)
   const [favRename, setFavRename] = useState<any>(null)
   const [favRenameValue, setFavRenameValue] = useState('')
+  const [dragFavoriteId, setDragFavoriteId] = useState<number | null>(null)
+  const [dragCurrentPage, setDragCurrentPage] = useState(false)
+  const [favoriteDrop, setFavoriteDrop] = useState<{ id: number | 'bar'; position: 'before' | 'after' | 'inside' } | null>(null)
   const [showBookmarkSave, setShowBookmarkSave] = useState(false)
   const [bookmarkFolder, setBookmarkFolder] = useState<string>('root')
   const [bookmarkTitle, setBookmarkTitle] = useState('')
@@ -58,6 +90,10 @@ export default function BrowserPage() {
   const [sitePermOpen, setSitePermOpen] = useState(false)
   const [sitePermissions, setSitePermissions] = useState<any[]>([])
   const [dragTabId, setDragTabId] = useState<string | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findText, setFindText] = useState('')
+  const findInputRef = useRef<HTMLInputElement | null>(null)
+  const suppressIdentityClickRef = useRef(false)
 
 
   const activeTab = tabs.find(t => t.id === activeId) || tabs[0]
@@ -65,19 +101,55 @@ export default function BrowserPage() {
 
   const activeIdRef = useRef(activeId)
 
+  const refreshFavorites = useCallback(async () => {
+    const favorites = await window.zap?.getFavorites()
+    setFavBar(favorites || [])
+    window.dispatchEvent(new Event('favorites-updated'))
+    return favorites || []
+  }, [])
+
+  const importBookmarksHtml = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.html,.htm'
+    input.onchange = async (event: any) => {
+      const file = event.target.files?.[0]
+      if (!file) return
+      await window.zap?.importFavoritesHtml({ html: await file.text() })
+      await refreshFavorites()
+    }
+    input.click()
+  }, [refreshFavorites])
+
+  const exportBookmarksHtml = useCallback(async () => {
+    const result = await window.zap?.exportFavoritesHtml?.()
+    if (!result?.html) return
+
+    const blobUrl = URL.createObjectURL(new Blob([result.html], { type: 'text/html;charset=utf-8' }))
+    const anchor = document.createElement('a')
+    anchor.href = blobUrl
+    anchor.download = 'zap-browser-bookmarks.html'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(blobUrl)
+  }, [])
+
   useEffect(() => {
     activeIdRef.current = activeId
   }, [activeId])
 
-  // Load privacy settings
   useEffect(() => {
-    window.zap?.getDownloadHistory?.().then((items:any[]) => {
-      if (Array.isArray(items)) setDownloads(items)
-    })
-  }, [])
+    if (!findOpen) return
+    setTimeout(() => {
+      findInputRef.current?.focus()
+      findInputRef.current?.select()
+    }, 0)
+  }, [findOpen])
 
   useEffect(() => {
     window.zap?.getPrivacy().then(setPrivacy)
+    window.zap?.browserProfileActive?.().then(setBrowserProfile)
     const loadFavBar = () => window.zap?.getFavorites().then((f: any[]) => setFavBar(f || []))
     loadFavBar()
     window.addEventListener('favorites-updated', loadFavBar)
@@ -87,6 +159,31 @@ export default function BrowserPage() {
     window.zap?.getBlockedCount().then(setBlocked)
     return () => window.removeEventListener('favorites-updated', loadFavBar)
   }, [])
+
+  useEffect(() => {
+    const onProfileChanged = (event: Event) => {
+      const nextProfile = (event as CustomEvent).detail
+      const tab = resetTabs()
+
+      setBrowserProfile(nextProfile || null)
+      window.zap?.getPrivacy().then(setPrivacy)
+      setAddrVal('')
+      setFindOpen(false)
+      setFindText('')
+      setPageNostr(false)
+      setV4vInfo(null)
+      setSitePermissions([])
+      setSitePermOpen(false)
+      setShowSuggest(false)
+
+      window.zap?.tabCreate({ tabId: tab.id, private: false }).then(() => {
+        window.zap?.tabHome({ tabId: tab.id })
+      })
+    }
+
+    window.addEventListener('browser-profile-changed', onProfileChanged)
+    return () => window.removeEventListener('browser-profile-changed', onProfileChanged)
+  }, [resetTabs])
 
   useEffect(() => {
     const closeFavContext = () => setFavContext(null)
@@ -102,6 +199,47 @@ export default function BrowserPage() {
       window.removeEventListener('keydown', closeFavContextOnEsc)
     }
   }, [])
+
+  const runFind = useCallback((text: string, forward = true, findNext = false) => {
+    const tabId = activeIdRef.current
+    if (!tabId || !text.trim()) return
+
+    window.zap?.tabFind?.({
+      tabId,
+      text: text.trim(),
+      forward,
+      findNext,
+    })
+  }, [])
+
+  const closeFindBar = useCallback(() => {
+    const tabId = activeIdRef.current
+    if (tabId) {
+      window.zap?.tabStopFind?.({ tabId, action: 'clearSelection' })
+    }
+    setFindOpen(false)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isFindShortcut = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'
+
+      if (isFindShortcut) {
+        e.preventDefault()
+        e.stopPropagation()
+        setFindOpen(true)
+        return
+      }
+
+      if (e.key === 'Escape' && findOpen) {
+        e.preventDefault()
+        closeFindBar()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [closeFindBar, findOpen])
 
   // Dynamic bookmarks bar capacity
   useEffect(() => {
@@ -133,7 +271,13 @@ export default function BrowserPage() {
 
   // Listen to events from main process
   useEffect(() => {
-    window.zap?.on('tab-updated', (data: any) => {
+    const disposers: Array<() => void> = []
+    const onZap = (channel: string, cb: (data: any) => void) => {
+      const dispose = window.zap?.on?.(channel, cb)
+      if (typeof dispose === 'function') disposers.push(dispose)
+    }
+
+    onZap('tab-updated', (data: any) => {
       let favicon = undefined
       try {
         if (data.url?.startsWith('http')) {
@@ -151,14 +295,15 @@ export default function BrowserPage() {
       })
       if (data.tabId === activeIdRef.current && data.url) setAddrVal(data.url)
     })
-    window.zap?.on('blocked-count', (n: number) => setBlocked(n))
-    window.zap?.on('ua-mode-updated', async () => {
+    onZap('blocked-count', (n: number) => setBlocked(n))
+    onZap('privacy-updated', (state: any) => setPrivacy(state))
+    onZap('ua-mode-updated', async () => {
       const p = await window.zap?.getPrivacy()
       setPrivacy(p)
       setUaDrop(false)
     })
 
-    window.zap?.on('open-new-tab', ({ url }: any) => {
+    onZap('open-new-tab', ({ url }: any) => {
       const now = Date.now()
       const w = window as any
 
@@ -171,8 +316,8 @@ export default function BrowserPage() {
 
       handleNewTab(url)
     })
-    window.zap?.on('payment-detected', (data: any) => setPayment(data))
-    window.zap?.on('popup-blocked', (data: any) => {
+    onZap('payment-detected', (data: any) => setPayment(data))
+    onZap('popup-blocked', (data: any) => {
       setPopupBlocked(data || {})
       setTimeout(() => setPopupBlocked(null), 4500)
     })
@@ -184,16 +329,16 @@ export default function BrowserPage() {
       }
     })
 
-    window.zap?.on('download-started', (data: any) => {
+    onZap('download-started', (data: any) => {
       setDownloads(prev => [data, ...prev.filter(d => d.id !== data.id)])
       setDownloadsOpen(true)
     })
 
-    window.zap?.on('download-updated', (data: any) => {
+    onZap('download-updated', (data: any) => {
       setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
     })
 
-    window.zap?.on('download-done', (data: any) => {
+    onZap('download-done', (data: any) => {
       setDownloads(prev => prev.map(d => d.id === data.id ? { ...d, ...data } : d))
       setDownloadsOpen(true)
 
@@ -204,7 +349,7 @@ export default function BrowserPage() {
       } catch (_) {}
     })
 
-    window.zap?.on('address-suggestion-picked', (data: any) => {
+    onZap('address-suggestion-picked', (data: any) => {
       if (!data?.url) return
       setAddrVal(data.url)
       setSuggestions([])
@@ -214,7 +359,7 @@ export default function BrowserPage() {
       handleNavigate(data.url)
     })
 
-    window.zap?.on('bookmark-open-new-tab', (bookmark: any) => {
+    onZap('bookmark-open-new-tab', (bookmark: any) => {
       if (!bookmark?.url) return
 
       const now = Date.now()
@@ -231,12 +376,12 @@ export default function BrowserPage() {
       handleNewTab(bookmark.url)
     })
 
-    window.zap?.on('bookmark-rename', (bookmark: any) => {
+    onZap('bookmark-rename', (bookmark: any) => {
       setFavRename(bookmark)
       setFavRenameValue(bookmark?.title || '')
     })
 
-    window.zap?.on('bookmark-delete', async (bookmark: any) => {
+    onZap('bookmark-delete', async (bookmark: any) => {
       if (!bookmark?.id) return
 
       const w = window as any
@@ -275,7 +420,7 @@ export default function BrowserPage() {
       }
     })
 
-    window.zap?.on('bookmark-folder-picked', (item: any) => {
+    onZap('bookmark-folder-picked', (item: any) => {
       const url = typeof item === 'string' ? item : item?.url
 
       if (!url) return
@@ -284,7 +429,7 @@ export default function BrowserPage() {
       handleNavigate(url)
     })
 
-    window.zap?.on('bookmark-create-folder-request', async (data: any) => {
+    onZap('bookmark-create-folder-request', async (data: any) => {
       console.log('[DEBUG][renderer] bookmark-create-folder-request received', data)
       console.log('[BookmarksBar] create folder request received')
 
@@ -360,6 +505,9 @@ export default function BrowserPage() {
     window.addEventListener('toggle-favbar', onToggleFavBar)
 
     return () => {
+      disposers.forEach(dispose => {
+        try { dispose() } catch (_) {}
+      })
       if (balanceWatcherTimer) clearInterval(balanceWatcherTimer)
       window.removeEventListener('navigate-to', onNavigateTo)
       window.removeEventListener('toggle-favbar', onToggleFavBar)
@@ -374,18 +522,27 @@ export default function BrowserPage() {
 
   // Notify main of panel state for view resize
   useEffect(() => {
-    const chromeOverlayOpen =
-      showSuggest ||
-      !!favFolderOpen ||
-      favDropOpen ||
-      !!favContext ||
-      showBookmarkSave ||
-      !!favRename
+    const panelElement = document.querySelector('.side-panel') as HTMLElement | null
+    const syncBrowserViewBounds = () => {
+      window.zap?.shellResize({
+        panelOpen: panel !== null,
+        panelWidth: panelElement?.getBoundingClientRect().width || 0,
+      })
+    }
 
-    window.zap?.shellResize({
-      panelOpen: panel !== null,
-      suggestionsOpen: chromeOverlayOpen
-    })
+    syncBrowserViewBounds()
+
+    const observer = panelElement && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(syncBrowserViewBounds)
+      : null
+
+    if (panelElement) observer?.observe(panelElement)
+    window.addEventListener('resize', syncBrowserViewBounds)
+
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', syncBrowserViewBounds)
+    }
   }, [panel, showSuggest, favFolderOpen, favDropOpen, favContext, showBookmarkSave, favRename])
 
 
@@ -820,10 +977,6 @@ export default function BrowserPage() {
           marginLeft:4,
           flexShrink:0,
         }}>
-          <span title={activeTab?.url?.startsWith('https') ? 'Secure HTTPS connection' : 'Non secure connection'}>
-            {secIcon()}
-          </span>
-
           {nostrAllowed && (
             <span
               title="NIP-07 allowed"
@@ -864,11 +1017,46 @@ export default function BrowserPage() {
         }}>
           <button
             title="Site permissions"
-            onClick={openSitePermissions}
+            draggable={!isNew}
+            onDragStart={(e) => {
+              if (!activeTab?.url || isNew) {
+                e.preventDefault()
+                return
+              }
+
+              const page: CurrentPageDrag = {
+                url: activeTab.url,
+                title: activeTab.title || activeTab.url,
+                favicon: activeTab.favicon,
+              }
+
+              suppressIdentityClickRef.current = true
+              setDragCurrentPage(true)
+              e.dataTransfer.effectAllowed = 'copy'
+              e.dataTransfer.setData(CURRENT_PAGE_DRAG_TYPE, JSON.stringify(page))
+              e.dataTransfer.setData('text/uri-list', page.url)
+              e.dataTransfer.setData('text/plain', page.url)
+            }}
+            onDragEnd={() => {
+              setDragCurrentPage(false)
+              setFavoriteDrop(null)
+              window.setTimeout(() => {
+                suppressIdentityClickRef.current = false
+              }, 0)
+            }}
+            onClick={(e) => {
+              if (suppressIdentityClickRef.current) {
+                e.preventDefault()
+                e.stopPropagation()
+                return
+              }
+              openSitePermissions()
+            }}
+            className={dragCurrentPage ? 'page-identity-button dragging' : 'page-identity-button'}
             style={{
               background:'none',
               border:'none',
-              cursor:'pointer',
+              cursor: isNew ? 'pointer' : 'grab',
               color:'var(--t2)',
               fontSize:14,
               padding:0,
@@ -1014,12 +1202,62 @@ export default function BrowserPage() {
 
         {/* Panel buttons */}
         <div className="panel-btns">
+          <button
+            className={`panel-btn ${panel === 'settings' ? 'active' : ''}`}
+            title={browserProfile?.name ? `Active profile: ${browserProfile.name}` : 'Browser profiles'}
+            onClick={() => setPanel('settings')}
+          >
+            👤 {browserProfile?.name || 'Default'}
+          </button>
           <button className={`panel-btn ${panel === 'wallet' ? 'active' : ''}`} onClick={() => togglePanel('wallet')}>⚡ Wallet</button>
           <button className={`panel-btn ${panel === 'nostr' ? 'active' : ''}`} onClick={() => togglePanel('nostr')}>🟣</button>
           <button className={`panel-btn ${panel === 'favorites' ? 'active' : ''}`} onClick={() => togglePanel('favorites')}>⭐</button>
           <button className={`panel-btn ${panel === 'settings' ? 'active' : ''}`} onClick={() => togglePanel('settings')}>⚙️</button>
         </div>
       </div>
+      {findOpen && (
+        <div className="find-bar">
+          <span className="find-label">Find</span>
+          <input
+            ref={findInputRef}
+            className="find-input"
+            value={findText}
+            onChange={(e) => {
+              const value = e.target.value
+              setFindText(value)
+              runFind(value, true, false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                closeFindBar()
+                return
+              }
+
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                runFind(findText, !e.shiftKey, true)
+              }
+            }}
+            spellCheck={false}
+          />
+          <button
+            className="find-btn"
+            title="Previous match"
+            onClick={() => runFind(findText, false, true)}
+          >
+            ↑
+          </button>
+          <button
+            className="find-btn"
+            title="Next match"
+            onClick={() => runFind(findText, true, true)}
+          >
+            ↓
+          </button>
+          <button className="find-btn" title="Close find" onClick={closeFindBar}>×</button>
+        </div>
+      )}
       {showBookmarkSave && (
         <div
           onClick={() => setShowBookmarkSave(false)}
@@ -1238,12 +1476,10 @@ export default function BrowserPage() {
               !['bookmarks bar', 'barra dei preferiti'].includes(String(f.title || '').toLowerCase())
             )
 
-        const barItems = [...rawBarItems].sort((a:any, b:any) => {
-          const af = Number(a.is_folder) === 1 ? 1 : 0
-          const bf = Number(b.is_folder) === 1 ? 1 : 0
-          if (af !== bf) return af - bf
-          return Number(a.sort_order || 0) - Number(b.sort_order || 0)
-        })
+        const barItems = [...rawBarItems].sort((a:any, b:any) =>
+          Number(a.sort_order || 0) - Number(b.sort_order || 0) ||
+          Number(a.id) - Number(b.id)
+        )
 
         const createFolderInBar = async () => {
           try {
@@ -1295,6 +1531,96 @@ export default function BrowserPage() {
             console.error('[FavBar] create folder failed', err)
             window.alert('Create folder failed: ' + (err?.message || err))
           }
+        }
+
+        const handleEmptyBarAction = async () => {
+          const result = await window.zap?.showBookmarkContextMenu?.(null)
+
+          if (result?.action === 'new-bookmark') {
+            setBookmarkTitle(activeTab?.title || activeTab?.url || '')
+            setBookmarkFolder(barRootId == null ? 'root' : String(barRootId))
+            setShowBookmarkSave(true)
+          } else if (result?.action === 'new-folder') {
+            await createFolderInBar()
+          } else if (result?.action === 'import-bookmarks') {
+            importBookmarksHtml()
+          } else if (result?.action === 'export-bookmarks') {
+            await exportBookmarksHtml()
+          } else if (result?.action === 'refresh') {
+            await refreshFavorites()
+          }
+        }
+
+        const moveFavoriteTo = async (itemId: number, parentId: number | null, index: number) => {
+          const result = await window.zap?.moveFavorite?.({
+            id: itemId,
+            parent_id: parentId,
+            index,
+          })
+
+          if (result?.ok === false) {
+            window.alert(result.error || 'Move failed')
+          } else {
+            await refreshFavorites()
+          }
+
+          setDragFavoriteId(null)
+          setFavoriteDrop(null)
+        }
+
+        const addDraggedPage = async (page: CurrentPageDrag, parentId: number | null, index: number) => {
+          const result = await window.zap?.addFavoriteAt?.({
+            title: page.title || page.url,
+            url: page.url,
+            favicon: page.favicon || null,
+            parent_id: parentId,
+            index,
+          })
+
+          if (result?.ok === false) {
+            window.alert(result.error || 'Could not create bookmark')
+          } else {
+            await refreshFavorites()
+          }
+
+          setDragCurrentPage(false)
+          setFavoriteDrop(null)
+        }
+
+        const dropOnBarItem = async (
+          target: any,
+          position: 'before' | 'after' | 'inside',
+          page: CurrentPageDrag | null,
+        ) => {
+          if (page) {
+            if (position === 'inside' && Number(target.is_folder) === 1) {
+              await addDraggedPage(page, Number(target.id), getChildren(target.id).length)
+              return
+            }
+
+            const targetIndex = barItems.findIndex((item:any) => Number(item.id) === Number(target.id))
+            await addDraggedPage(
+              page,
+              barRootId == null ? null : Number(barRootId),
+              Math.max(0, targetIndex + (position === 'after' ? 1 : 0)),
+            )
+            return
+          }
+
+          if (dragFavoriteId == null || Number(target.id) === dragFavoriteId) return
+
+          if (position === 'inside' && Number(target.is_folder) === 1) {
+            await moveFavoriteTo(dragFavoriteId, Number(target.id), getChildren(target.id).length)
+            return
+          }
+
+          const siblings = barItems.filter((item:any) => Number(item.id) !== dragFavoriteId)
+          const targetIndex = siblings.findIndex((item:any) => Number(item.id) === Number(target.id))
+          await moveFavoriteTo(
+            dragFavoriteId,
+            barRootId == null ? null : Number(barRootId),
+            Math.max(0, targetIndex + (position === 'after' ? 1 : 0)),
+          )
         }
 
         const visible = barItems.slice(0, favBarMax)
@@ -1396,29 +1722,38 @@ export default function BrowserPage() {
 
               e.preventDefault()
               e.stopPropagation()
-
-              const title = window.prompt('Folder name', 'New folder')
-
-              if (title?.trim()) {
-                const rootId = favBarRootIdRef.current ?? barRootId ?? null
-
-                await window.zap?.addFavorite({
-                  title: title.trim(),
-                  url: '',
-                  favicon: null,
-                  parent_id: rootId,
-                  is_folder: 1,
-                  sort_order: Date.now(),
-                })
-
-                const f = await window.zap?.getFavorites()
-                setFavBar(f || [])
-                window.dispatchEvent(new Event('favorites-updated'))
-              }
-
+              await handleEmptyBarAction()
               setFavFolderOpen(null)
               setFavDropOpen(false)
             }}
+            onDragOver={(e) => {
+              const currentPage = dragCurrentPage || hasCurrentPageDrag(e.dataTransfer)
+              if (dragFavoriteId == null && !currentPage) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = currentPage ? 'copy' : 'move'
+              setFavoriteDrop({ id: 'bar', position: 'inside' })
+            }}
+            onDrop={async (e) => {
+              const page = readCurrentPageDrag(e.dataTransfer)
+              if (dragFavoriteId == null && !page) return
+              e.preventDefault()
+              e.stopPropagation()
+              if (page) {
+                await addDraggedPage(
+                  page,
+                  barRootId == null ? null : Number(barRootId),
+                  barItems.length,
+                )
+                return
+              }
+              const siblings = barItems.filter((item:any) => Number(item.id) !== dragFavoriteId)
+              await moveFavoriteTo(
+                dragFavoriteId,
+                barRootId == null ? null : Number(barRootId),
+                siblings.length,
+              )
+            }}
+            className={favoriteDrop?.id === 'bar' ? 'bookmark-bar bookmark-drop-root' : 'bookmark-bar'}
             style={{
               display:'flex', alignItems:'center', gap:2,
               padding:'2px 8px', borderBottom:'1px solid var(--b0)',
@@ -1451,7 +1786,44 @@ export default function BrowserPage() {
               const children = isFolder ? getChildren(f.id) : []
 
               return (
-                <div key={f.id} style={{ position:'relative', flexShrink:0 }}>
+                <div
+                  key={f.id}
+                  className={[
+                    'bookmark-drag-item',
+                    dragFavoriteId === Number(f.id) ? 'dragging' : '',
+                    favoriteDrop?.id === Number(f.id) ? `drop-${favoriteDrop.position}` : '',
+                  ].filter(Boolean).join(' ')}
+                  style={{ position:'relative', flexShrink:0 }}
+                  draggable
+                  onDragStart={(e) => {
+                    setDragFavoriteId(Number(f.id))
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('application/x-zap-favorite', String(f.id))
+                  }}
+                  onDragEnd={() => {
+                    setDragFavoriteId(null)
+                    setFavoriteDrop(null)
+                  }}
+                  onDragOver={(e) => {
+                    const currentPage = dragCurrentPage || hasCurrentPageDrag(e.dataTransfer)
+                    if (!currentPage && (dragFavoriteId == null || dragFavoriteId === Number(f.id))) return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    e.dataTransfer.dropEffect = currentPage ? 'copy' : 'move'
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const ratio = (e.clientX - rect.left) / Math.max(1, rect.width)
+                    const position = isFolder && ratio > .3 && ratio < .7
+                      ? 'inside'
+                      : ratio < .5 ? 'before' : 'after'
+                    setFavoriteDrop({ id: Number(f.id), position })
+                  }}
+                  onDrop={async (e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (favoriteDrop?.id !== Number(f.id)) return
+                    await dropOnBarItem(f, favoriteDrop.position, readCurrentPageDrag(e.dataTransfer))
+                  }}
+                >
                   <button
                     data-zap-favitem="1"
                     onClick={(e) => {
@@ -1483,7 +1855,9 @@ export default function BrowserPage() {
                     onMouseEnter={e => (e.currentTarget.style.background='var(--bg-3)')}
                     onMouseLeave={e => (e.currentTarget.style.background='none')}
                   >
-                    {isFolder ? '📁' : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
+                    {isFolder ? '📁' : f.favicon ? (
+                      <img className="bookmark-favicon" src={f.favicon} alt="" draggable={false} />
+                    ) : '🌐'} {f.title?.slice(0, 18) || (() => { try { return new URL(f.url).hostname } catch(_) { return f.url } })()}
                   </button>
 
 
@@ -1750,7 +2124,7 @@ export default function BrowserPage() {
 
         {/* Side panel */}
         {panel && (
-          <div className="side-panel">
+          <div className={`side-panel ${panel === 'settings' ? 'settings-side-panel' : ''}`}>
             {panel === 'wallet'    && <WalletPanel    onClose={() => setPanel(null)} />}
             {panel === 'nostr'     && <NostrPanel     onClose={() => setPanel(null)} />}
             {panel === 'favorites' && <FavoritesPanel onClose={() => setPanel(null)} onNavigate={handleNavigate} onOpenNewTab={handleNewTab} currentUrl={activeTab?.url||''} currentTitle={activeTab?.title||''} />}

@@ -1,11 +1,17 @@
 {
   "name": "zap-browser",
-  "version": "0.5.0-beta",
+  "version": "0.6.0-beta",
   "description": "Privacy-first Bitcoin browser with Lightning, Liquid, Cashu and Nostr",
+  "homepage": "https://github.com/shadowbipnode/Zap-Browser",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shadowbipnode/Zap-Browser.git"
+  },
   "main": "src/main/index.js",
   "scripts": {
     "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:3000 && electron .\"",
     "dev:renderer": "vite --config src/renderer/vite.config.ts",
+    "test": "node test/run.js",
     "build": "vite build --config src/renderer/vite.config.ts && electron-builder",
     "pack": "electron-builder --dir",
     "postinstall": "electron-builder install-app-deps"
@@ -28,8 +34,17 @@
         "Comment": "Privacy-first sovereign browser with Lightning, Cashu and Nostr",
         "Categories": "Network;WebBrowser;"
       },
+      "artifactName": "Zap-Browser-${version}-linux-${arch}.${ext}",
       "synopsis": "Privacy-first sovereign browser",
       "description": "Privacy-focused sovereign browser with native Lightning, Cashu, Nostr and Tor workflows."
+    },
+    "deb": {
+      "afterInstall": "build/linux-after-install.sh",
+      "afterRemove": "build/linux-after-remove.sh"
+    },
+    "rpm": {
+      "afterInstall": "build/linux-after-install.sh",
+      "afterRemove": "build/linux-after-remove.sh"
     },
     "mac": {
       "target": "dmg"
@@ -55,7 +70,8 @@
           ]
         }
       ],
-      "icon": "assets/icons/icon.ico"
+      "icon": "assets/icons/icon.ico",
+      "artifactName": "Zap-Browser-Portable-${version}-${arch}.${ext}"
     },
     "files": [
       "src/main/**",
@@ -65,7 +81,6 @@
     ],
     "icon": "assets/icons/icon.png",
     "executableName": "zap-browser",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "buildVersion": "0.5.0-beta-1",
     "directories": {
       "buildResources": "assets"

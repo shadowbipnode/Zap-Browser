@@ -1,6 +1,7 @@
 'use strict'
 
 const path      = require('path')
+const crypto    = require('crypto')
 const { app }   = require('electron')
 
 let db = null
@@ -14,6 +15,20 @@ function init() {
 
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS browser_profiles (
+      id           TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      is_default   INTEGER NOT NULL DEFAULT 0,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      last_used_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS browser_profile_state (
+      id                INTEGER PRIMARY KEY CHECK (id=1),
+      active_profile_id TEXT NOT NULL REFERENCES browser_profiles(id)
+    );
+
     CREATE TABLE IF NOT EXISTS downloads (
       id TEXT PRIMARY KEY,
       filename TEXT,
@@ -109,7 +124,7 @@ function init() {
 
 
     CREATE TABLE IF NOT EXISTS privacy_settings (
-      id             INTEGER PRIMARY KEY,
+      browser_profile_id TEXT PRIMARY KEY REFERENCES browser_profiles(id) ON DELETE CASCADE,
       adblock        INTEGER NOT NULL DEFAULT 1,
       webrtc_protect INTEGER NOT NULL DEFAULT 1,
       ua_mode        TEXT    NOT NULL DEFAULT 'rotate',
@@ -122,68 +137,346 @@ function init() {
       popup_block    INTEGER NOT NULL DEFAULT 1,
       overlay_block  INTEGER NOT NULL DEFAULT 1
     );
-    INSERT OR IGNORE INTO privacy_settings (id) VALUES (1);
   `)
 
-  try { db.prepare('ALTER TABLE favorites ADD COLUMN parent_id INTEGER').run() } catch (_) {}
-  try { db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
-  try { db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
+  migrateBrowserProfiles()
+  migrateBookmarksSchema()
+  migrateNwcConnectionsSchema()
+  migratePrivacySettingsSchema()
+  migrateNostrProfilesSchema()
+  migrateNostrPermissionsSchema()
+}
 
-  // Nostr multi-profile migration
-  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN active INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
-  try { db.prepare('ALTER TABLE nostr_profile ADD COLUMN last_used_at INTEGER').run() } catch (_) {}
-  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_pubkey ON nostr_profile(pubkey)').run() } catch (_) {}
+function migrateBrowserProfiles() {
+  const ts = now()
 
-  // NIP-07 permissions per active Nostr profile
-  try { db.prepare('ALTER TABLE nostr_permissions ADD COLUMN profile_id INTEGER').run() } catch (_) {}
-  try {
-    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
-    if (active) {
-      db.prepare('UPDATE nostr_permissions SET profile_id=? WHERE profile_id IS NULL').run(active.id)
+  db.transaction(() => {
+    db.exec('DROP INDEX IF EXISTS idx_browser_profiles_default')
+    db.prepare(`
+      INSERT OR IGNORE INTO browser_profiles
+        (id, name, is_default, created_at, updated_at, last_used_at)
+      VALUES ('default', 'Default', 1, ?, ?, ?)
+    `).run(ts, ts, ts)
+
+    db.prepare(`
+      UPDATE browser_profiles
+      SET is_default = CASE WHEN id='default' THEN 1 ELSE 0 END
+    `).run()
+
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_profiles_default
+      ON browser_profiles(is_default)
+      WHERE is_default=1
+    `)
+
+    const active = db.prepare(`
+      SELECT active_profile_id
+      FROM browser_profile_state
+      WHERE id=1
+    `).get()
+    const activeExists = active && db.prepare(`
+      SELECT 1
+      FROM browser_profiles
+      WHERE id=?
+    `).get(active.active_profile_id)
+
+    if (!active) {
+      db.prepare(`
+        INSERT INTO browser_profile_state(id, active_profile_id)
+        VALUES (1, 'default')
+      `).run()
+    } else if (!activeExists) {
+      db.prepare(`
+        UPDATE browser_profile_state
+        SET active_profile_id='default'
+        WHERE id=1
+      `).run()
     }
-  } catch (_) {}
-  try { db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_permissions_profile_origin_action ON nostr_permissions(profile_id, origin, action)').run() } catch (_) {}
+  })()
+}
 
+function migrateBookmarksSchema() {
+  const originalColumns = new Set(
+    db.prepare('PRAGMA table_info(favorites)').all().map(column => column.name)
+  )
+  const wasFlatSchema = !originalColumns.has('parent_id') && !originalColumns.has('is_folder')
 
-  try {
-    const active = db.prepare('SELECT id FROM nostr_profile WHERE active=1 LIMIT 1').get()
-    const first = db.prepare('SELECT id FROM nostr_profile ORDER BY id ASC LIMIT 1').get()
+  if (!originalColumns.has('parent_id')) {
+    db.prepare('ALTER TABLE favorites ADD COLUMN parent_id INTEGER').run()
+  }
+  if (!originalColumns.has('is_folder')) {
+    db.prepare('ALTER TABLE favorites ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0').run()
+  }
+  if (!originalColumns.has('sort_order')) {
+    db.prepare('ALTER TABLE favorites ADD COLUMN sort_order INTEGER').run()
+  }
 
-    if (!active && first) {
-      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?')
-        .run(Math.floor(Date.now() / 1000), first.id)
-    }
-  } catch (_) {}
+  db.transaction(() => {
+    db.prepare('UPDATE favorites SET is_folder=0 WHERE is_folder IS NULL').run()
 
-
-  // Legacy bookmarks migration:
-  // Older Zap Browser versions stored bookmarks directly at root without a
-  // dedicated bookmarks bar folder. Create the root folder and move legacy
-  // root items into it once.
-  try {
-    const bar = db
-      .prepare("SELECT id FROM favorites WHERE is_folder=1 AND lower(title) IN ('bookmarks bar', 'barra dei preferiti') LIMIT 1")
-      .get()
+    let bar = db.prepare(`
+      SELECT id
+      FROM favorites
+      WHERE is_folder=1
+        AND lower(trim(title)) IN ('bookmarks bar', 'barra dei preferiti')
+      ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, id ASC
+      LIMIT 1
+    `).get()
 
     if (!bar) {
-      const info = db
-        .prepare("INSERT INTO favorites(title,url,favicon,parent_id,is_folder,sort_order,created_at) VALUES(?,?,?,?,?,?,?)")
-        .run('Bookmarks bar', '', null, null, 1, 0, Date.now())
+      const info = db.prepare(`
+        INSERT INTO favorites
+          (title, url, favicon, parent_id, is_folder, sort_order, created_at)
+        VALUES ('Bookmarks bar', '', NULL, NULL, 1, 0, ?)
+      `).run(now())
+      bar = { id: Number(info.lastInsertRowid) }
+    } else {
+      db.prepare('UPDATE favorites SET parent_id=NULL WHERE id=?').run(bar.id)
+    }
 
-      const barId = info.lastInsertRowid
+    const barId = Number(bar.id)
 
+    if (wasFlatSchema) {
       db.prepare(`
         UPDATE favorites
-        SET parent_id = ?
-        WHERE parent_id IS NULL
-          AND id != ?
+        SET parent_id=?
+        WHERE id != ?
       `).run(barId, barId)
     }
-  } catch (_) {}
 
+    db.prepare(`
+      UPDATE favorites
+      SET parent_id=?
+      WHERE parent_id IS NOT NULL
+        AND id != ?
+        AND (
+          parent_id=id
+          OR NOT EXISTS (
+            SELECT 1
+            FROM favorites parent
+            WHERE parent.id=favorites.parent_id
+              AND parent.is_folder=1
+          )
+        )
+    `).run(barId, barId)
 
-migrateNwcConnectionsSchema()
-migratePrivacySettingsSchema()
+    repairFavoriteCycles(barId)
+    normalizeFavoriteSortOrder()
+  })()
+}
+
+function repairFavoriteCycles(barId) {
+  const rows = db.prepare(`
+    SELECT id, parent_id
+    FROM favorites
+    ORDER BY id ASC
+  `).all()
+  const parentById = new Map(rows.map(row => [
+    Number(row.id),
+    row.parent_id == null ? null : Number(row.parent_id),
+  ]))
+  const repaired = new Set()
+
+  for (const row of rows) {
+    const path = []
+    const positions = new Map()
+    let cursor = Number(row.id)
+
+    while (cursor != null && parentById.has(cursor)) {
+      if (positions.has(cursor)) {
+        const cycle = path.slice(positions.get(cursor))
+        const repairId = Math.min(...cycle)
+        const repairParent = repairId === barId ? null : barId
+        parentById.set(repairId, repairParent)
+        repaired.add(repairId)
+        break
+      }
+
+      positions.set(cursor, path.length)
+      path.push(cursor)
+      cursor = parentById.get(cursor)
+    }
+  }
+
+  const update = db.prepare('UPDATE favorites SET parent_id=? WHERE id=?')
+  for (const id of [...repaired].sort((a, b) => a - b)) {
+    update.run(parentById.get(id), id)
+  }
+}
+
+function normalizeFavoriteSortOrder() {
+  const parents = db.prepare(`
+    SELECT DISTINCT parent_id
+    FROM favorites
+    ORDER BY parent_id IS NOT NULL, parent_id ASC
+  `).all()
+  const selectRoot = db.prepare(`
+    SELECT id
+    FROM favorites
+    WHERE parent_id IS NULL
+    ORDER BY
+      CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END,
+      sort_order ASC,
+      id ASC
+  `)
+  const selectChildren = db.prepare(`
+    SELECT id
+    FROM favorites
+    WHERE parent_id=?
+    ORDER BY
+      CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END,
+      sort_order ASC,
+      id ASC
+  `)
+
+  for (const parent of parents) {
+    const parentId = parent.parent_id == null ? null : Number(parent.parent_id)
+    const siblings = parentId == null ? selectRoot.all() : selectChildren.all(parentId)
+    writeFavoriteOrder(parentId, siblings.map(row => Number(row.id)))
+  }
+}
+
+function migrateNostrPermissionsSchema() {
+  const columns = db
+    .prepare('PRAGMA table_info(nostr_permissions)')
+    .all()
+    .map(c => c.name)
+
+  const ts = now()
+
+  if (!columns.includes('browser_profile_id')) {
+    db.transaction(() => {
+      db.exec('DROP TABLE IF EXISTS nostr_permissions_next')
+      db.exec(`
+        CREATE TABLE nostr_permissions_next (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          browser_profile_id TEXT    NOT NULL DEFAULT 'default' REFERENCES browser_profiles(id),
+          origin             TEXT    NOT NULL,
+          action             TEXT    NOT NULL,
+          decision           TEXT    NOT NULL,
+          created_at         INTEGER NOT NULL,
+          updated_at         INTEGER NOT NULL,
+          UNIQUE(browser_profile_id, origin, action)
+        )
+      `)
+
+      db.prepare(`
+        INSERT OR IGNORE INTO nostr_permissions_next
+          (browser_profile_id, origin, action, decision, created_at, updated_at)
+        SELECT
+          'default',
+          origin,
+          action,
+          decision,
+          COALESCE(created_at, ?),
+          COALESCE(updated_at, ?)
+        FROM nostr_permissions
+        ORDER BY id ASC
+      `).run(ts, ts)
+
+      db.exec('DROP TABLE nostr_permissions')
+      db.exec('ALTER TABLE nostr_permissions_next RENAME TO nostr_permissions')
+    })()
+  }
+
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE nostr_permissions
+      SET browser_profile_id='default'
+      WHERE browser_profile_id IS NULL
+        OR browser_profile_id=''
+        OR NOT EXISTS (
+          SELECT 1
+          FROM browser_profiles
+          WHERE browser_profiles.id=nostr_permissions.browser_profile_id
+        )
+    `).run()
+
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_permissions_browser_profile_origin_action
+      ON nostr_permissions(browser_profile_id, origin, action)
+    `)
+  })()
+}
+
+function migrateNostrProfilesSchema() {
+  const columns = db
+    .prepare('PRAGMA table_info(nostr_profile)')
+    .all()
+    .map(c => c.name)
+
+  if (!columns.includes('active')) {
+    db.prepare('ALTER TABLE nostr_profile ADD COLUMN active INTEGER NOT NULL DEFAULT 0').run()
+  }
+
+  if (!columns.includes('last_used_at')) {
+    db.prepare('ALTER TABLE nostr_profile ADD COLUMN last_used_at INTEGER').run()
+  }
+
+  if (!columns.includes('browser_profile_id')) {
+    db.prepare("ALTER TABLE nostr_profile ADD COLUMN browser_profile_id TEXT NOT NULL DEFAULT 'default'").run()
+  }
+
+  db.prepare(`
+    UPDATE nostr_profile
+    SET browser_profile_id='default'
+    WHERE browser_profile_id IS NULL
+      OR browser_profile_id=''
+      OR NOT EXISTS (
+        SELECT 1
+        FROM browser_profiles
+        WHERE browser_profiles.id=nostr_profile.browser_profile_id
+      )
+  `).run()
+  db.exec(`
+    UPDATE nostr_profile
+    SET active=0
+    WHERE active=1
+      AND id NOT IN (
+        SELECT MAX(id)
+        FROM nostr_profile
+        WHERE active=1
+        GROUP BY browser_profile_id
+      )
+  `)
+  db.exec('DROP INDEX IF EXISTS idx_nostr_profile_pubkey')
+  db.exec('DROP INDEX IF EXISTS idx_nostr_profile_active_browser_profile')
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_browser_profile_pubkey
+    ON nostr_profile(browser_profile_id, pubkey)
+  `)
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_nostr_profile_active_browser_profile
+    ON nostr_profile(browser_profile_id)
+    WHERE active=1
+  `)
+
+  const ts = now()
+  const browserProfiles = db.prepare('SELECT id FROM browser_profiles').all()
+
+  for (const browserProfile of browserProfiles) {
+    const active = db.prepare(`
+      SELECT id
+      FROM nostr_profile
+      WHERE browser_profile_id=? AND active=1
+      ORDER BY last_used_at DESC, id DESC
+      LIMIT 1
+    `).get(browserProfile.id)
+
+    if (active) continue
+
+    const first = db.prepare(`
+      SELECT id
+      FROM nostr_profile
+      WHERE browser_profile_id=?
+      ORDER BY last_used_at DESC, id DESC
+      LIMIT 1
+    `).get(browserProfile.id)
+
+    if (first) {
+      db.prepare('UPDATE nostr_profile SET active=1, last_used_at=? WHERE id=?').run(ts, first.id)
+    }
+  }
 }
 function migrateNwcConnectionsSchema() {
   const columns = db
@@ -199,10 +492,75 @@ function migrateNwcConnectionsSchema() {
 }
 
 function migratePrivacySettingsSchema() {
-  const columns = db
+  let columns = db
     .prepare('PRAGMA table_info(privacy_settings)')
     .all()
     .map(c => c.name)
+
+  if (!columns.includes('browser_profile_id')) {
+    const legacyValue = (name, fallback) => columns.includes(name) ? name : fallback
+
+    db.transaction(() => {
+      db.exec('DROP TABLE IF EXISTS privacy_settings_next')
+      db.exec(`
+        CREATE TABLE privacy_settings_next (
+          browser_profile_id TEXT PRIMARY KEY REFERENCES browser_profiles(id) ON DELETE CASCADE,
+          adblock            INTEGER NOT NULL DEFAULT 1,
+          webrtc_protect     INTEGER NOT NULL DEFAULT 1,
+          ua_mode            TEXT    NOT NULL DEFAULT 'rotate',
+          custom_ua          TEXT,
+          doh_enabled        INTEGER NOT NULL DEFAULT 1,
+          doh_provider       TEXT    NOT NULL DEFAULT 'https://cloudflare-dns.com/dns-query',
+          tor_enabled        INTEGER NOT NULL DEFAULT 0,
+          tor_host           TEXT    NOT NULL DEFAULT '127.0.0.1',
+          tor_port           INTEGER NOT NULL DEFAULT 9050,
+          popup_block        INTEGER NOT NULL DEFAULT 1,
+          overlay_block      INTEGER NOT NULL DEFAULT 1
+        )
+      `)
+
+      db.exec(`
+        INSERT INTO privacy_settings_next (
+          browser_profile_id,
+          adblock,
+          webrtc_protect,
+          ua_mode,
+          custom_ua,
+          doh_enabled,
+          doh_provider,
+          tor_enabled,
+          tor_host,
+          tor_port,
+          popup_block,
+          overlay_block
+        )
+        SELECT
+          'default',
+          ${legacyValue('adblock', '1')},
+          ${legacyValue('webrtc_protect', '1')},
+          ${legacyValue('ua_mode', "'rotate'")},
+          ${legacyValue('custom_ua', 'NULL')},
+          ${legacyValue('doh_enabled', '1')},
+          ${legacyValue('doh_provider', "'https://cloudflare-dns.com/dns-query'")},
+          ${legacyValue('tor_enabled', '0')},
+          ${legacyValue('tor_host', "'127.0.0.1'")},
+          ${legacyValue('tor_port', '9050')},
+          ${legacyValue('popup_block', '1')},
+          ${legacyValue('overlay_block', '1')}
+        FROM privacy_settings
+        ORDER BY CASE WHEN id=1 THEN 0 ELSE 1 END, id ASC
+        LIMIT 1
+      `)
+
+      db.exec('DROP TABLE privacy_settings')
+      db.exec('ALTER TABLE privacy_settings_next RENAME TO privacy_settings')
+    })()
+
+    columns = db
+      .prepare('PRAGMA table_info(privacy_settings)')
+      .all()
+      .map(c => c.name)
+  }
 
   if (!columns.includes('popup_block')) {
     db.prepare('ALTER TABLE privacy_settings ADD COLUMN popup_block INTEGER NOT NULL DEFAULT 1').run()
@@ -211,6 +569,23 @@ function migratePrivacySettingsSchema() {
   if (!columns.includes('overlay_block')) {
     db.prepare('ALTER TABLE privacy_settings ADD COLUMN overlay_block INTEGER NOT NULL DEFAULT 1').run()
   }
+
+  db.prepare(`
+    UPDATE privacy_settings
+    SET browser_profile_id='default'
+    WHERE browser_profile_id IS NULL
+      OR browser_profile_id=''
+      OR NOT EXISTS (
+        SELECT 1
+        FROM browser_profiles
+        WHERE browser_profiles.id=privacy_settings.browser_profile_id
+      )
+  `).run()
+
+  db.exec(`
+    INSERT OR IGNORE INTO privacy_settings(browser_profile_id)
+    SELECT id FROM browser_profiles
+  `)
 }
 
 const now = () => Math.floor(Date.now() / 1000)
@@ -220,16 +595,108 @@ function getSetting(key) {
   const row = db.prepare('SELECT value FROM settings WHERE key=?').get(key)
   return row ? row.value : null
 }
+
+// ── Browser profiles ──────────────────────────────────────────────────────────
+function getActiveBrowserProfile() {
+  return db.prepare(`
+    SELECT p.*
+    FROM browser_profiles p
+    JOIN browser_profile_state s ON s.active_profile_id=p.id
+    WHERE s.id=1
+    LIMIT 1
+  `).get() || db.prepare('SELECT * FROM browser_profiles WHERE id=?').get('default')
+}
+
+function listBrowserProfiles() {
+  return db.prepare(`
+    SELECT *
+    FROM browser_profiles
+    ORDER BY is_default DESC, last_used_at DESC, name ASC
+  `).all()
+}
+
+function createBrowserProfile({ name }) {
+  const title = String(name || '').trim()
+  if (!title) throw new Error('Profile name is required')
+
+  const id = crypto.randomUUID()
+  const ts = now()
+
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO browser_profiles
+        (id, name, is_default, created_at, updated_at, last_used_at)
+      VALUES (?, ?, 0, ?, ?, ?)
+    `).run(id, title, ts, ts, ts)
+    db.prepare('INSERT INTO privacy_settings(browser_profile_id) VALUES (?)').run(id)
+  })()
+
+  return getBrowserProfileById(id)
+}
+
+function renameBrowserProfile(id, name) {
+  const profileId = String(id || '')
+  const title = String(name || '').trim()
+  if (!title) throw new Error('Profile name is required')
+
+  const existing = getBrowserProfileById(profileId)
+  if (!existing) throw new Error('Browser profile not found')
+
+  const ts = now()
+  db.prepare('UPDATE browser_profiles SET name=?, updated_at=? WHERE id=?').run(title, ts, profileId)
+
+  return getBrowserProfileById(profileId)
+}
+
+function setActiveBrowserProfile(id) {
+  const profile = db.prepare('SELECT * FROM browser_profiles WHERE id=?').get(String(id || ''))
+  if (!profile) throw new Error('Browser profile not found')
+
+  const ts = now()
+  db.prepare('UPDATE browser_profiles SET last_used_at=?, updated_at=? WHERE id=?').run(ts, ts, profile.id)
+  db.prepare('UPDATE browser_profile_state SET active_profile_id=? WHERE id=1').run(profile.id)
+
+  return getActiveBrowserProfile()
+}
+
+function getBrowserProfileById(id) {
+  return db.prepare('SELECT * FROM browser_profiles WHERE id=?').get(String(id || '')) || null
+}
+
+function deleteBrowserProfile(id) {
+  const profileId = String(id || '')
+  const profile = getBrowserProfileById(profileId)
+
+  if (!profile) throw new Error('Browser profile not found')
+  if (Number(profile.is_default) === 1) throw new Error('The default profile cannot be deleted')
+
+  const wasActive = getActiveBrowserProfileId() === profileId
+
+  db.transaction(() => {
+    if (wasActive) {
+      db.prepare("UPDATE browser_profile_state SET active_profile_id='default' WHERE id=1").run()
+      const ts = now()
+      db.prepare("UPDATE browser_profiles SET last_used_at=?, updated_at=? WHERE id='default'").run(ts, ts)
+    }
+
+    db.prepare('DELETE FROM nostr_permissions WHERE browser_profile_id=?').run(profileId)
+    db.prepare('DELETE FROM nostr_profile WHERE browser_profile_id=?').run(profileId)
+    db.prepare('DELETE FROM privacy_settings WHERE browser_profile_id=?').run(profileId)
+    db.prepare('DELETE FROM browser_profiles WHERE id=?').run(profileId)
+  })()
+
+  return {
+    ok: true,
+    deleted_profile_id: profileId,
+    was_active: wasActive,
+    active_profile: getActiveBrowserProfile(),
+  }
+}
 function setSetting(key, value) {
   db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run(key, value)
 }
 
 // ── Privacy ───────────────────────────────────────────────────────────────────
-
-try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_enabled INTEGER NOT NULL DEFAULT 0').run() } catch (_) {}
-try { db.prepare("ALTER TABLE privacy_settings ADD COLUMN tor_host TEXT NOT NULL DEFAULT '127.0.0.1'").run() } catch (_) {}
-try { db.prepare('ALTER TABLE privacy_settings ADD COLUMN tor_port INTEGER NOT NULL DEFAULT 9050').run() } catch (_) {}
-
 
 function ensurePrivacyMigrations() {
   const cols = db.prepare("PRAGMA table_info(privacy_settings)").all().map(c => c.name)
@@ -247,15 +714,33 @@ function ensurePrivacyMigrations() {
   }
 }
 
+const PRIVACY_KEYS = new Set([
+  'adblock',
+  'webrtc_protect',
+  'ua_mode',
+  'custom_ua',
+  'doh_enabled',
+  'doh_provider',
+  'tor_enabled',
+  'tor_host',
+  'tor_port',
+  'popup_block',
+  'overlay_block',
+])
 
-function getPrivacy() {
+function getPrivacy(browserProfileId = null) {
   ensurePrivacyMigrations()
-  return db.prepare('SELECT * FROM privacy_settings WHERE id=1').get()
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+  db.prepare('INSERT OR IGNORE INTO privacy_settings(browser_profile_id) VALUES (?)').run(targetBrowserProfileId)
+  return db.prepare('SELECT * FROM privacy_settings WHERE browser_profile_id=?').get(targetBrowserProfileId)
 }
-function setPrivacy(key, value) {
+function setPrivacy(key, value, browserProfileId = null) {
   ensurePrivacyMigrations()
-  db.prepare(`UPDATE privacy_settings SET ${key}=? WHERE id=1`).run(value)
-  return getPrivacy()
+  if (!PRIVACY_KEYS.has(key)) throw new Error('Invalid privacy setting')
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+  db.prepare('INSERT OR IGNORE INTO privacy_settings(browser_profile_id) VALUES (?)').run(targetBrowserProfileId)
+  db.prepare(`UPDATE privacy_settings SET ${key}=? WHERE browser_profile_id=?`).run(value, targetBrowserProfileId)
+  return getPrivacy(targetBrowserProfileId)
 }
 
 // ── Favorites ─────────────────────────────────────────────────────────────────
@@ -265,33 +750,105 @@ function getFavorites() {
     FROM favorites
     ORDER BY
       COALESCE(parent_id, 0),
-      is_folder DESC,
       sort_order ASC,
-      created_at DESC
+      id ASC
   `).all()
 }
-function addFavorite({ title, url, favicon, parent_id = null, is_folder = 0, sort_order = 0 }) {
+function getFavoriteSiblings(parentId, excludeId = null) {
+  const parentClause = parentId == null ? 'parent_id IS NULL' : 'parent_id=?'
+  const params = parentId == null ? [] : [parentId]
+  let sql = `
+    SELECT id
+    FROM favorites
+    WHERE ${parentClause}
+  `
+
+  if (excludeId != null) {
+    sql += ' AND id != ?'
+    params.push(excludeId)
+  }
+
+  sql += ' ORDER BY sort_order ASC, id ASC'
+  return db.prepare(sql).all(...params)
+}
+
+function writeFavoriteOrder(parentId, ids) {
+  const update = db.prepare('UPDATE favorites SET parent_id=?, sort_order=? WHERE id=?')
+  ids.forEach((id, index) => update.run(parentId, index, id))
+}
+
+function nextFavoriteSortOrder(parentId) {
+  const row = parentId == null
+    ? db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS value FROM favorites WHERE parent_id IS NULL').get()
+    : db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS value FROM favorites WHERE parent_id=?').get(parentId)
+
+  return Number(row?.value ?? -1) + 1
+}
+
+function addFavorite({ title, url, favicon, parent_id = null, is_folder = 0, sort_order }) {
   const ts = now()
   const safeUrl = is_folder ? '' : url
+  const targetParent = parent_id === null || parent_id === undefined ? null : Number(parent_id)
+  const targetOrder = Number.isFinite(Number(sort_order))
+    ? Number(sort_order)
+    : nextFavoriteSortOrder(targetParent)
 
   const r = db
     .prepare('INSERT INTO favorites(title,url,favicon,parent_id,is_folder,sort_order,created_at) VALUES(?,?,?,?,?,?,?)')
-    .run(title, safeUrl, favicon || null, parent_id, is_folder ? 1 : 0, sort_order || 0, ts)
+    .run(title, safeUrl, favicon || null, targetParent, is_folder ? 1 : 0, targetOrder, ts)
 
   return {
     id: r.lastInsertRowid,
     title,
     url: safeUrl,
     favicon: favicon || null,
-    parent_id,
+    parent_id: targetParent,
     is_folder: is_folder ? 1 : 0,
-    sort_order: sort_order || 0,
+    sort_order: targetOrder,
     created_at: ts,
   }
 }
+
+function addFavoriteAt({ title, url, favicon, parent_id = null }, index = null) {
+  const targetParent = parent_id === null || parent_id === undefined ? null : Number(parent_id)
+
+  if (targetParent !== null) {
+    const parent = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(targetParent)
+    if (!parent || Number(parent.is_folder) !== 1) {
+      return { ok: false, error: 'Invalid target folder' }
+    }
+  }
+
+  const transaction = db.transaction(() => {
+    const siblings = getFavoriteSiblings(targetParent).map(row => Number(row.id))
+    const requestedIndex = index === null || index === undefined ? siblings.length : Number(index)
+    const targetIndex = Number.isFinite(requestedIndex)
+      ? Math.max(0, Math.min(siblings.length, Math.trunc(requestedIndex)))
+      : siblings.length
+    const created = addFavorite({
+      title,
+      url,
+      favicon,
+      parent_id: targetParent,
+      is_folder: 0,
+    })
+
+    siblings.splice(targetIndex, 0, Number(created.id))
+    writeFavoriteOrder(targetParent, siblings)
+
+    return {
+      ...created,
+      ok: true,
+      sort_order: targetIndex,
+    }
+  })
+
+  return transaction()
+}
+
 function removeFavorite(id) {
   const item = db.prepare(`
-    SELECT id, is_folder
+    SELECT id, parent_id, is_folder
     FROM favorites
     WHERE id=?
   `).get(id)
@@ -324,6 +881,7 @@ function removeFavorite(id) {
     `).run(id)
   }
 
+  writeFavoriteOrder(item.parent_id, getFavoriteSiblings(item.parent_id).map(row => row.id))
   return true
 }
 
@@ -332,14 +890,14 @@ function updateFavoriteTitle(id, title) {
   return { ok: true, id, title }
 }
 
-function moveFavorite(id, parent_id = null) {
-  const item = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(id)
+function moveFavorite(id, parent_id = null, index = null) {
+  const item = db.prepare('SELECT id, parent_id, is_folder FROM favorites WHERE id=?').get(id)
   if (!item) return { ok: false, error: 'Favorite not found' }
 
   const targetParent = parent_id === null || parent_id === undefined ? null : Number(parent_id)
 
   if (targetParent !== null) {
-    const parent = db.prepare('SELECT id, is_folder FROM favorites WHERE id=?').get(targetParent)
+    const parent = db.prepare('SELECT id, parent_id, is_folder FROM favorites WHERE id=?').get(targetParent)
 
     if (!parent || Number(parent.is_folder) !== 1) {
       return { ok: false, error: 'Invalid target folder' }
@@ -358,9 +916,30 @@ function moveFavorite(id, parent_id = null) {
     }
   }
 
-  db.prepare('UPDATE favorites SET parent_id=? WHERE id=?').run(targetParent, id)
+  const transaction = db.transaction(() => {
+    const sourceParent = item.parent_id == null ? null : Number(item.parent_id)
+    const sourceIds = getFavoriteSiblings(sourceParent, id).map(row => Number(row.id))
+    const targetIds = sourceParent === targetParent
+      ? sourceIds
+      : getFavoriteSiblings(targetParent, id).map(row => Number(row.id))
+    const requestedIndex = index === null || index === undefined
+      ? targetIds.length
+      : Number(index)
+    const targetIndex = Number.isFinite(requestedIndex)
+      ? Math.max(0, Math.min(targetIds.length, Math.trunc(requestedIndex)))
+      : targetIds.length
 
-  return { ok: true, id, parent_id: targetParent }
+    targetIds.splice(targetIndex, 0, Number(id))
+
+    if (sourceParent !== targetParent) writeFavoriteOrder(sourceParent, sourceIds)
+    writeFavoriteOrder(targetParent, targetIds)
+
+    return targetIndex
+  })
+
+  const sortOrder = transaction()
+
+  return { ok: true, id, parent_id: targetParent, sort_order: sortOrder }
 }
 
 // ── Cashu ─────────────────────────────────────────────────────────────────────
@@ -402,50 +981,69 @@ function getActiveNostrProfileId() {
   return row?.id || null
 }
 
-function getNostrPermission(origin, action) {
-  return db
-    .prepare('SELECT decision FROM nostr_permissions WHERE origin=? AND action=?')
-    .get(origin, action) || null
+function getActiveBrowserProfileId() {
+  return getActiveBrowserProfile()?.id || 'default'
 }
 
-function setNostrPermission(origin, action, decision) {
+function getNostrPermission(origin, action, browserProfileId = null) {
+  return db
+    .prepare(`
+      SELECT decision
+      FROM nostr_permissions
+      WHERE browser_profile_id=? AND origin=? AND action=?
+    `)
+    .get(browserProfileId || getActiveBrowserProfileId(), origin, action) || null
+}
+
+function setNostrPermission(origin, action, decision, browserProfileId = null) {
   const ts = now()
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
 
   db.prepare(`
-    INSERT INTO nostr_permissions(origin, action, decision, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(origin, action)
+    INSERT INTO nostr_permissions(browser_profile_id, origin, action, decision, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(browser_profile_id, origin, action)
     DO UPDATE SET decision=excluded.decision, updated_at=excluded.updated_at
-  `).run(origin, action, decision, ts, ts)
+  `).run(targetBrowserProfileId, origin, action, decision, ts, ts)
 
-  return { origin, action, decision }
+  return { browser_profile_id: targetBrowserProfileId, profile_id: targetBrowserProfileId, origin, action, decision }
 }
 
-function listNostrPermissions() {
+function listNostrPermissions(browserProfileId = null) {
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+
   return db
-    .prepare('SELECT profile_id, origin, action, decision, updated_at FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) ORDER BY updated_at DESC')
-    .all()
+    .prepare(`
+      SELECT browser_profile_id, browser_profile_id AS profile_id, origin, action, decision, updated_at
+      FROM nostr_permissions
+      WHERE browser_profile_id=?
+      ORDER BY updated_at DESC
+    `)
+    .all(targetBrowserProfileId)
 }
 
-function removeNostrPermission(origin, action) {
+function removeNostrPermission(origin, action, browserProfileId = null) {
+  const targetBrowserProfileId = browserProfileId || getActiveBrowserProfileId()
+
   db
-    .prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1) AND origin=? AND action=?')
-    .run(origin, action)
+    .prepare('DELETE FROM nostr_permissions WHERE browser_profile_id=? AND origin=? AND action=?')
+    .run(targetBrowserProfileId, origin, action)
 
   return { ok: true }
 }
 
-function clearNostrPermissions() {
-  db.prepare('DELETE FROM nostr_permissions WHERE profile_id=(SELECT id FROM nostr_profile WHERE active=1 ORDER BY last_used_at DESC, id DESC LIMIT 1)').run()
+function clearNostrPermissions(browserProfileId = null) {
+  db.prepare('DELETE FROM nostr_permissions WHERE browser_profile_id=?').run(browserProfileId || getActiveBrowserProfileId())
   return { ok: true }
 }
 
 module.exports = {
   init,
   getSetting, setSetting,
+  getActiveBrowserProfile, getActiveBrowserProfileId, listBrowserProfiles, createBrowserProfile, renameBrowserProfile, setActiveBrowserProfile, getBrowserProfileById, deleteBrowserProfile,
   getPrivacy, setPrivacy,
   addDownload, getDownloads, clearDownloads,
-  getFavorites, addFavorite, removeFavorite, updateFavoriteTitle, moveFavorite,
+  getFavorites, addFavorite, addFavoriteAt, removeFavorite, updateFavoriteTitle, moveFavorite,
   addHistory, getHistory, clearHistory,
   cashuGetBalance, cashuListMints, cashuAddMint, cashuRemoveMint,
   getNostrPermission, setNostrPermission, listNostrPermissions, removeNostrPermission, clearNostrPermissions,
@@ -492,4 +1090,3 @@ function getDownloads() {
 function clearDownloads() {
   db.prepare('DELETE FROM downloads').run()
 }
-
