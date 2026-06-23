@@ -144,6 +144,14 @@ jobs:
           Do not store large funds inside the browser yet.
 
           Windows builds are experimental.
+
+          ## Support the project
+
+          If you find Zap Browser useful, you can support development here:
+
+          - GitHub Sponsors: https://github.com/sponsors/shadowbipnode
+          - Lightning donation: zap@shadowbip.com
+          - Bitcoin donation: bc1qgppvys2e0zx3r87fvtdytwped3xft385sj9800
           NOTES
 
       - name: Publish release
