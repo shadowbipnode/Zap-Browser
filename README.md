@@ -28,6 +28,8 @@ No cloud sync.
 
 Zap Browser is currently in active beta.
 
+Current release: v0.6.0-beta
+
 It is usable for testing and daily experimentation, but it should still be treated as early-stage software. Do not store life-changing funds or highly sensitive operational secrets in beta builds.
 
 The current focus is:
@@ -43,7 +45,7 @@ The current focus is:
 
 ---
 
-# What's New in v0.5.0-beta
+# What's New in v0.6.0-beta
 
 Zap Browser v0.5.0-beta is a major privacy, browser UX and architecture release.
 
@@ -458,18 +460,16 @@ npm start
 
 # Roadmap
 
-## v0.6 — Browser Core Hardening
+## v0.7 — Embedded Tor & Platform Expansion
 
 Planned focus:
 
-- deeper BrowserView/session cleanup
-- stronger fingerprint profile system
-- screen/font normalization
-- improved WebGL consistency
-- portable unlock UI
-- encrypted portable profile UX
-- improved Tor diagnostics
-- better update/install migration handling
+- Optional embedded Tor runtime
+- Improved Tor diagnostics
+- Better Tor UX and onboarding
+- Android feasibility research
+- Browser engine abstraction groundwork
+- Electron to Tauri migration evaluation
 
 ## Future Research
 
@@ -520,10 +520,20 @@ Please report vulnerabilities responsibly.
 
 ---
 
+# Support the Project
+
+Zap Browser is developed as an independent open-source project.
+
+If you find it useful, consider supporting development:
+
+- GitHub Sponsors: https://github.com/sponsors/shadowbipnode
+- Lightning: zap@shadowbip.com
+- Bitcoin: bc1qgppvys2e0zx3r87fvtdytwped3xft385sj9800
+
 # License
 
 MIT
 
 ---
 
-> Not your browser, not your privacy.
+> Sovereign browsing for Bitcoin, Lightning, Cashu, Nostr and privacy-first workflows.
