@@ -1,6 +1,6 @@
 {
   "name": "zap-browser",
-  "version": "0.5.0-beta",
+  "version": "0.6.0-beta",
   "description": "Privacy-first Bitcoin browser with Lightning, Liquid, Cashu and Nostr",
   "homepage": "https://github.com/shadowbipnode/Zap-Browser",
   "repository": {
